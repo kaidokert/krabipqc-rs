@@ -1,26 +1,36 @@
-//! Fixed-length vectors and matrices of polynomials in R_q.
+//! Fixed-length vectors and matrices of polynomials in `R_q`.
 //!
-//! Generic over the modulus `M`. The NTT-domain helpers (`.ntt()`,
-//! `.inv_ntt()`, `PolyMatrix::mul_vec_ntt`) are only available when `M`
-//! implements [`NttScheme`] — ML-DSA and ML-KEM each plug in their own.
+//! `PolyVec<T, LEN>` and `PolyMatrix<T, K, L>` are storage shells over
+//! [`Poly<T>`]. Element-wise arithmetic (`add` / `sub`) takes the
+//! modulus as a runtime value and delegates to the per-coefficient
+//! `Poly` methods, which themselves route through
+//! [`modmath::basic::pre_reduced`].
 
-use core::marker::PhantomData;
-
-use fixed_bigint::{Nct, Personality};
 use zeroize::Zeroize;
 
-use crate::field::Modulus;
-use crate::params::N;
 use crate::poly::Poly;
 
-/// A vector of `LEN` polynomials over Z_q (Q determined by `M`).
+/// A vector of `LEN` polynomials with coefficient type `T`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct PolyVec<M: Modulus, const LEN: usize> {
-    pub v: [Poly<M>; LEN],
-    _m: PhantomData<fn() -> M>,
+pub struct PolyVec<T, const LEN: usize> {
+    pub v: [Poly<T>; LEN],
 }
 
-impl<M: Modulus, const LEN: usize> Zeroize for PolyVec<M, LEN> {
+impl<T: Copy + Default, const LEN: usize> Default for PolyVec<T, LEN> {
+    fn default() -> Self {
+        Self::zero()
+    }
+}
+
+impl<T: Copy + Default, const LEN: usize> PolyVec<T, LEN> {
+    pub fn zero() -> Self {
+        Self {
+            v: [Poly::<T>::zero(); LEN],
+        }
+    }
+}
+
+impl<T: Zeroize, const LEN: usize> Zeroize for PolyVec<T, LEN> {
     fn zeroize(&mut self) {
         for p in &mut self.v {
             p.zeroize();
@@ -28,226 +38,109 @@ impl<M: Modulus, const LEN: usize> Zeroize for PolyVec<M, LEN> {
     }
 }
 
-impl<M: Modulus, const LEN: usize> PolyVec<M, LEN> {
-    pub const fn zero() -> Self {
+impl<const LEN: usize> PolyVec<u32, LEN> {
+    /// Element-wise vector addition.
+    pub fn add(&self, other: &Self, modulus: u32) -> Self {
+        let mut out = Self::zero();
+        for i in 0..LEN {
+            out.v[i] = self.v[i].add(&other.v[i], modulus);
+        }
+        out
+    }
+
+    /// Element-wise vector subtraction.
+    pub fn sub(&self, other: &Self, modulus: u32) -> Self {
+        let mut out = Self::zero();
+        for i in 0..LEN {
+            out.v[i] = self.v[i].sub(&other.v[i], modulus);
+        }
+        out
+    }
+}
+
+/// A `K × L` matrix of polynomials.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PolyMatrix<T, const K: usize, const L: usize> {
+    pub rows: [PolyVec<T, L>; K],
+}
+
+impl<T: Copy + Default, const K: usize, const L: usize> Default for PolyMatrix<T, K, L> {
+    fn default() -> Self {
+        Self::zero()
+    }
+}
+
+impl<T: Copy + Default, const K: usize, const L: usize> PolyMatrix<T, K, L> {
+    pub fn zero() -> Self {
         Self {
-            v: [Poly::<M>::zero(); LEN],
-            _m: PhantomData,
+            rows: [PolyVec::<T, L>::zero(); K],
+        }
+    }
+}
+
+impl<T: Zeroize, const K: usize, const L: usize> Zeroize for PolyMatrix<T, K, L> {
+    fn zeroize(&mut self) {
+        for row in &mut self.rows {
+            row.zeroize();
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::params::N;
+
+    const Q: u32 = 17;
+
+    #[test]
+    fn vec_add_sub_roundtrip() {
+        let mut a = PolyVec::<u32, 4>::zero();
+        let mut b = PolyVec::<u32, 4>::zero();
+        for i in 0..4 {
+            for j in 0..N {
+                a.v[i].coeffs[j] = ((i * 100 + j) as u32) % Q;
+                b.v[i].coeffs[j] = ((j * 3 + i) as u32) % Q;
+            }
+        }
+        let s = a.add(&b, Q);
+        let r = s.sub(&b, Q);
+        assert_eq!(r, a);
+    }
+
+    #[test]
+    fn vec_zeroize_clears_everything() {
+        let mut a = PolyVec::<u32, 4>::zero();
+        for i in 0..4 {
+            for j in 0..N {
+                a.v[i].coeffs[j] = (j as u32 + 1) % Q;
+            }
+        }
+        a.zeroize();
+        for i in 0..4 {
+            for j in 0..N {
+                assert_eq!(a.v[i].coeffs[j], 0);
+            }
         }
     }
 
-    pub fn add(&self, other: &Self) -> Self {
-        let mut out = Self::zero();
-        for i in 0..LEN {
-            out.v[i] = self.v[i].add(&other.v[i]);
-        }
-        out
-    }
-
-    pub fn sub(&self, other: &Self) -> Self {
-        let mut out = Self::zero();
-        for i in 0..LEN {
-            out.v[i] = self.v[i].sub(&other.v[i]);
-        }
-        out
-    }
-
-    /// Max absolute centered coefficient across the whole vector.
-    pub fn inf_norm(&self) -> u32 {
-        let mut m = 0u32;
-        for poly in &self.v {
-            for &c in &poly.coeffs {
-                let a = M::abs_centered(c);
-                if a > m {
-                    m = a;
+    #[test]
+    fn matrix_zeroize_clears_everything() {
+        let mut m = PolyMatrix::<u32, 2, 3>::zero();
+        for i in 0..2 {
+            for j in 0..3 {
+                for k in 0..N {
+                    m.rows[i].v[j].coeffs[k] = ((i + j + k) as u32) % Q;
                 }
             }
         }
-        m
-    }
-}
-
-/// NTT-domain scheme parameterized by the personality `P`.
-///
-/// Each `(modulus, personality)` pair gets its own impl — the NTT
-/// butterflies and the `mul_ntt` body are identical algorithmically,
-/// but the underlying `Mont<M, P>::mul` they call routes to either
-/// `wide::mul` (Nct) or `wide::ct::mul` (Ct).
-///
-/// (For ML-DSA's complete NTT `mul_ntt` is the trivial elementwise product;
-/// for ML-KEM's incomplete NTT it's BaseCaseMultiply applied to 128 pairs.)
-pub trait NttScheme<P: Personality = Nct>: Modulus {
-    fn ntt(p: &mut Poly<Self>);
-    fn inv_ntt(p: &mut Poly<Self>);
-    fn mul_ntt(a: &Poly<Self>, b: &Poly<Self>) -> Poly<Self>;
-}
-
-// ---------------------------------------------------------------------------
-// NTT-domain methods on PolyVec / PolyMatrix.
-//
-// `vec.ntt()` etc. resolve to the Nct variant (matches the original
-// signature and keeps every existing call site working unchanged).
-// `vec.ntt_with::<P>()` is the personality-explicit form, used by
-// generic-over-P code
-// ---------------------------------------------------------------------------
-
-impl<M: Modulus, const LEN: usize> PolyVec<M, LEN> {
-    /// Forward NTT under the given personality.
-    pub fn ntt_with<P: Personality>(&self) -> Self
-    where
-        M: NttScheme<P>,
-    {
-        let mut out = *self;
-        for i in 0..LEN {
-            <M as NttScheme<P>>::ntt(&mut out.v[i]);
-        }
-        out
-    }
-
-    /// Inverse NTT under the given personality.
-    pub fn inv_ntt_with<P: Personality>(&self) -> Self
-    where
-        M: NttScheme<P>,
-    {
-        let mut out = *self;
-        for i in 0..LEN {
-            <M as NttScheme<P>>::inv_ntt(&mut out.v[i]);
-        }
-        out
-    }
-
-    /// `scale_pointwise` under the given personality.
-    pub fn scale_pointwise_with<P: Personality>(&self, c: &Poly<M>) -> Self
-    where
-        M: NttScheme<P>,
-    {
-        let mut out = Self::zero();
-        for i in 0..LEN {
-            out.v[i] = <M as NttScheme<P>>::mul_ntt(c, &self.v[i]);
-        }
-        out
-    }
-}
-
-impl<M: NttScheme<Nct>, const LEN: usize> PolyVec<M, LEN> {
-    /// Default-personality (Nct) forward NTT.
-    pub fn ntt(&self) -> Self {
-        self.ntt_with::<Nct>()
-    }
-
-    /// Default-personality (Nct) inverse NTT.
-    pub fn inv_ntt(&self) -> Self {
-        self.inv_ntt_with::<Nct>()
-    }
-
-    /// Default-personality (Nct) pointwise scale.
-    pub fn scale_pointwise(&self, c: &Poly<M>) -> Self {
-        self.scale_pointwise_with::<Nct>(c)
-    }
-}
-
-/// A K x L matrix of polynomials (k rows, l columns).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct PolyMatrix<M: Modulus, const K: usize, const L: usize> {
-    pub rows: [PolyVec<M, L>; K],
-    _m: PhantomData<fn() -> M>,
-}
-
-impl<M: Modulus, const K: usize, const L: usize> PolyMatrix<M, K, L> {
-    pub const fn zero() -> Self {
-        Self {
-            rows: [PolyVec::<M, L>::zero(); K],
-            _m: PhantomData,
-        }
-    }
-}
-
-impl<M: Modulus, const K: usize, const L: usize> PolyMatrix<M, K, L> {
-    /// Matrix–vector multiplication in the NTT domain under personality `P`:
-    /// out_i = sum_j a_ij * v_j. All inputs and outputs are NTT-domain.
-    pub fn mul_vec_ntt_with<P: Personality>(&self, v: &PolyVec<M, L>) -> PolyVec<M, K>
-    where
-        M: NttScheme<P>,
-    {
-        let mut out = PolyVec::<M, K>::zero();
-        for i in 0..K {
-            let mut acc = Poly::<M>::zero();
-            for j in 0..L {
-                let p = <M as NttScheme<P>>::mul_ntt(&self.rows[i].v[j], &v.v[j]);
-                acc = acc.add(&p);
+        m.zeroize();
+        for i in 0..2 {
+            for j in 0..3 {
+                for k in 0..N {
+                    assert_eq!(m.rows[i].v[j].coeffs[k], 0);
+                }
             }
-            out.v[i] = acc;
-        }
-        out
-    }
-}
-
-impl<M: NttScheme<Nct>, const K: usize, const L: usize> PolyMatrix<M, K, L> {
-    /// Default-personality (Nct) matrix-vector multiply.
-    pub fn mul_vec_ntt(&self, v: &PolyVec<M, L>) -> PolyVec<M, K> {
-        self.mul_vec_ntt_with::<Nct>(v)
-    }
-}
-
-impl<M: Modulus, const K: usize> PolyMatrix<M, K, K> {
-    /// Transposed matrix–vector multiplication under personality `P`:
-    /// out_i = sum_j a_ji * v_j. Only defined for square matrices.
-    pub fn transposed_mul_vec_ntt_with<P: Personality>(&self, v: &PolyVec<M, K>) -> PolyVec<M, K>
-    where
-        M: NttScheme<P>,
-    {
-        let mut out = PolyVec::<M, K>::zero();
-        for i in 0..K {
-            let mut acc = Poly::<M>::zero();
-            for j in 0..K {
-                let p = <M as NttScheme<P>>::mul_ntt(&self.rows[j].v[i], &v.v[j]);
-                acc = acc.add(&p);
-            }
-            out.v[i] = acc;
-        }
-        out
-    }
-}
-
-impl<M: NttScheme<Nct>, const K: usize> PolyMatrix<M, K, K> {
-    /// Default-personality transposed matrix-vector multiply.
-    pub fn transposed_mul_vec_ntt(&self, v: &PolyVec<M, K>) -> PolyVec<M, K> {
-        self.transposed_mul_vec_ntt_with::<Nct>(v)
-    }
-}
-
-impl<M: Modulus, const LEN: usize> PolyVec<M, LEN> {
-    /// NTT-domain dot product under personality `P`: `sum_i self[i] * other[i]`.
-    pub fn dot_ntt_with<P: Personality>(&self, other: &PolyVec<M, LEN>) -> Poly<M>
-    where
-        M: NttScheme<P>,
-    {
-        let mut acc = Poly::<M>::zero();
-        for i in 0..LEN {
-            let p = <M as NttScheme<P>>::mul_ntt(&self.v[i], &other.v[i]);
-            acc = acc.add(&p);
-        }
-        acc
-    }
-}
-
-impl<M: NttScheme<Nct>, const LEN: usize> PolyVec<M, LEN> {
-    /// Default-personality (Nct) dot product.
-    pub fn dot_ntt(&self, other: &PolyVec<M, LEN>) -> Poly<M> {
-        self.dot_ntt_with::<Nct>(other)
-    }
-}
-
-/// Helper to map a scalar function over every coefficient of a PolyVec.
-pub fn map_coeffs<M: Modulus, const LEN: usize, F: Fn(u32) -> u32>(
-    v: &PolyVec<M, LEN>,
-    f: F,
-) -> PolyVec<M, LEN> {
-    let mut out = PolyVec::<M, LEN>::zero();
-    for i in 0..LEN {
-        for j in 0..N {
-            out.v[i].coeffs[j] = f(v.v[i].coeffs[j]);
         }
     }
-    out
 }
