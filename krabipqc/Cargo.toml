@@ -1,0 +1,27 @@
+[package]
+name = "krabipqc"
+version = "0.1.0"
+edition = "2024"
+license = "Apache-2.0"
+description = "Prototype of no_std pqc"
+repository = "https://github.com/kaidokert/krabipqc-rs"
+readme = "../README.md"
+keywords = ["crypto", "post-quantum", "ml-dsa", "ml-kem", "no_std"]
+categories = ["cryptography", "no-std", "no-std::no-alloc"]
+
+[dependencies]
+# All Z_q arithmetic flows through modmath.
+modmath = { version = "0.3.0", features = ["wide-mul", "zeroize"] }
+
+# SHAKE-128 / SHAKE-256 / SHA3-256 / SHA3-512 wrappers in `hashing.rs`.
+sha3 = { version = "0.10", default-features = false }
+
+# For the Personality marker types (`Nct` / `Ct`) carried by `Mont<M, P>`.
+# The Ct path uses the wide-mul + zeroize features transitively.
+fixed-bigint = { version = "0.3", default-features = false, features = ["zeroize"] }
+
+# Constant-time primitives used by `Mont<M, Ct>` (ConditionallySelectable).
+subtle = { version = "2.6", default-features = false }
+
+# `Zeroize` impls on `Poly<M>` / `PolyVec<M, LEN>`.
+zeroize = { version = "1", default-features = false }
