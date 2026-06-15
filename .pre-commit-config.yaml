@@ -1,0 +1,29 @@
+repos:
+-   repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+    -   id: trailing-whitespace
+    -   id: end-of-file-fixer
+    -   id: check-added-large-files
+    -   id: check-merge-conflict
+    -   id: check-json
+    -   id: check-yaml
+    -   id: check-toml
+    -   id: mixed-line-ending
+        args: ["--fix=lf"]
+
+-   repo: https://github.com/doublify/pre-commit-rust
+    rev: v1.0
+    hooks:
+    -   id: fmt
+        name: Fmt for krabipqc
+        args: ['--manifest-path=krabipqc/Cargo.toml', '--']
+
+-   repo: local
+    hooks:
+    - id: clippy_krabipqc
+      name: Run clippy for krabipqc
+      language: system
+      entry: cargo clippy --manifest-path=krabipqc/Cargo.toml -- -D warnings
+      files: \.(rs|toml)$
+      pass_filenames: false

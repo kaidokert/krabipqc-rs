@@ -1,0 +1,53 @@
+name: Rust
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+permissions:
+  contents: read
+
+concurrency:
+  group: rust-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  host:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        persist-credentials: false
+    - uses: dtolnay/rust-toolchain@stable
+      with:
+        components: rustfmt, clippy
+    - uses: actions/cache@v4
+      with:
+        path: |
+          ~/.cargo/registry
+          ~/.cargo/git
+          krabipqc/target
+        key: host-${{ hashFiles('krabipqc/Cargo.toml') }}
+        restore-keys: host-
+
+    - name: Format check
+      run: cargo fmt --manifest-path=krabipqc/Cargo.toml -- --check
+
+    - name: Clippy
+      run: cargo clippy --manifest-path=krabipqc/Cargo.toml --all-targets --release -- -D warnings
+
+    - name: Build
+      run: cargo build --manifest-path=krabipqc/Cargo.toml --release --verbose
+
+    - name: Test
+      run: cargo test --manifest-path=krabipqc/Cargo.toml --release --verbose
+
+    - name: Docs
+      run: cargo doc --manifest-path=krabipqc/Cargo.toml --no-deps --release
+      env:
+        RUSTDOCFLAGS: "-D warnings"
