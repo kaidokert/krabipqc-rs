@@ -45,11 +45,10 @@ where
     P: Personality + FieldExt<P>,
 {
     const MAX_M_PRIME_PIECES: usize = 6;
-    assert!(
-        m_prime_pieces.len() <= MAX_M_PRIME_PIECES,
-        "too many M' pieces (max 6)"
-    );
-    if pk.len() != params.pk_bytes || sig.len() != params.sig_bytes {
+    if m_prime_pieces.len() > MAX_M_PRIME_PIECES
+        || pk.len() != params.pk_bytes
+        || sig.len() != params.sig_bytes
+    {
         return false;
     }
 
@@ -114,26 +113,22 @@ where
     let w1_packed = &mut w1_buf[..w1_len];
     let w1_chunk = 32 * params.w1_bits;
 
-    let mut row = Poly::<u32>::zero();
     for i in 0..K {
-        let mut acc = Poly::<u32>::zero();
+        let mut row = Poly::<u32>::zero();
         for j in 0..L {
             let a_ij = rej_ntt_poly(&rho, j as u8, i as u8);
             let p = ntt::mul_ntt::<P>(&a_ij, &z.v[j]);
-            acc = acc.add(&p, Q);
+            row = row.add(&p, Q);
         }
-        row = acc;
 
-        {
-            let mut t1_row = encoding::pk_t1_row(pk, i);
-            for k in 0..N {
-                t1_row.coeffs[k] = pr::mul::<u32>(t1_row.coeffs[k], two_d, Q);
-            }
-            ntt::ntt::<P>(&mut t1_row);
-            let ct1 = ntt::mul_ntt::<P>(&c_hat, &t1_row);
-            for k in 0..N {
-                row.coeffs[k] = pr::sub::<u32>(row.coeffs[k], ct1.coeffs[k], Q);
-            }
+        let mut t1_row = encoding::pk_t1_row(pk, i);
+        for k in 0..N {
+            t1_row.coeffs[k] = pr::mul::<u32>(t1_row.coeffs[k], two_d, Q);
+        }
+        ntt::ntt::<P>(&mut t1_row);
+        let ct1 = ntt::mul_ntt::<P>(&c_hat, &t1_row);
+        for k in 0..N {
+            row.coeffs[k] = pr::sub::<u32>(row.coeffs[k], ct1.coeffs[k], Q);
         }
 
         ntt::inv_ntt::<P>(&mut row);
@@ -149,7 +144,6 @@ where
             &mut w1_packed[i * w1_chunk..(i + 1) * w1_chunk],
         );
     }
-    let _ = row;
 
     let mut c_tilde_prime_buf = [0u8; MAX_CTILDE_BYTES];
     let c_tilde_prime = &mut c_tilde_prime_buf[..params.ctilde_bytes];

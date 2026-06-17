@@ -62,6 +62,7 @@ fn barrett_div_rem(x: u32, two_g: u32, bf: u32) -> (u32, u32) {
 /// centered low part.
 pub fn decompose(r: u32, gamma2: u32) -> (u32, u32) {
     debug_assert!(r < Q);
+    debug_assert!(gamma2 == GAMMA2_88 || gamma2 == GAMMA2_32);
     let two_g = 2 * gamma2;
     let bf = barrett_2gamma2(gamma2);
 
@@ -101,6 +102,7 @@ pub fn low_bits(r: u32, gamma2: u32) -> u32 {
 /// UseHint (FIPS 204 Alg 40). The `% m` spec ops collapse to a single
 /// conditional subtract because the dividends sit in `[0, 2m)`.
 pub fn use_hint(h: u32, r: u32, gamma2: u32) -> u32 {
+    debug_assert!(gamma2 == GAMMA2_88 || gamma2 == GAMMA2_32);
     let m = use_hint_m(gamma2);
     let (r1, r0) = decompose(r, gamma2);
 

@@ -59,12 +59,23 @@ where
 {
     let prompt: PromptFile = serde_json::from_str(prompt_text).expect("prompt json");
     let expected: ExpectedFile = serde_json::from_str(expected_text).expect("expected json");
+    assert_eq!(
+        expected.test_groups.len(),
+        prompt.test_groups.len(),
+        "prompt/expected group count mismatch"
+    );
     for group in &prompt.test_groups {
         let exp_group = expected
             .test_groups
             .iter()
             .find(|g| g.tg_id == group.tg_id)
             .expect("expected group");
+        assert_eq!(
+            exp_group.tests.len(),
+            group.tests.len(),
+            "tgId {}: prompt/expected test count mismatch",
+            group.tg_id
+        );
         for tc in &group.tests {
             let exp_tc = exp_group
                 .tests
@@ -77,8 +88,10 @@ where
             if sig.len() != sig_bytes {
                 assert!(
                     !exp_tc.test_passed,
-                    "tcId {}: short sig but expected to verify",
-                    tc.tc_id
+                    "tcId {}: sig len {} != {} but expected to verify",
+                    tc.tc_id,
+                    sig.len(),
+                    sig_bytes,
                 );
                 continue;
             }

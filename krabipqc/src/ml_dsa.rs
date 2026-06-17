@@ -77,7 +77,14 @@ macro_rules! per_set {
 
             /// Pre-hash selector for [`hash_verify`]. Carries the
             /// externally-computed digest plus the OID family the
-            /// verifier needs to bind it to.
+            /// verifier binds it to.
+            ///
+            /// SHA-256 and SHA-512 cover the digests used by current
+            /// TLS 1.3 + ML-DSA CertificateVerify codepoints. FIPS 204
+            /// §5.4 Algorithm 5 also approves SHA3-{256,384,512},
+            /// SHA-384, and SHAKE-128/256 pre-hashes; signatures
+            /// produced with those cannot be verified through this
+            /// API.
             #[derive(Clone, Copy, Debug, PartialEq, Eq)]
             pub enum PreHash {
                 /// SHA-256, OID 2.16.840.1.101.3.4.2.1.
