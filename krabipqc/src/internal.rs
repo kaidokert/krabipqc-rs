@@ -296,7 +296,8 @@ pub fn sign_internal_impl_pieces<const K: usize, const L: usize, P>(
                 }
             }
         }
-        if !(z_norm < params.gamma1 - params.beta && r0_norm < params.gamma2 - params.beta) {
+        if !(z_norm < params.gamma1 - params.beta && r0_norm < params.gamma2.value() - params.beta)
+        {
             kappa = kappa.wrapping_add(L as u16);
             continue;
         }
@@ -333,7 +334,10 @@ pub fn sign_internal_impl_pieces<const K: usize, const L: usize, P>(
             let count = core::cmp::min(idx, params.omega);
             hint_section[params.omega + i] = count as u8;
         }
-        if !(ct0_norm < params.gamma2 && (weight as usize) <= params.omega && !hint_overflow) {
+        if !(ct0_norm < params.gamma2.value()
+            && (weight as usize) <= params.omega
+            && !hint_overflow)
+        {
             kappa = kappa.wrapping_add(L as u16);
             continue;
         }
@@ -445,7 +449,6 @@ where
     // (~4 KiB) of scratch.
     let mut w1_buf = [0u8; MAX_W1_PACKED_BYTES];
     let w1_len = K * 32 * params.w1_bits;
-    debug_assert!(w1_len <= MAX_W1_PACKED_BYTES);
     let w1_packed = &mut w1_buf[..w1_len];
     let w1_chunk = 32 * params.w1_bits;
 

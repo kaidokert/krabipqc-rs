@@ -62,16 +62,72 @@ pub fn abs_centered(x: u32, q: u32) -> u32 {
     (x & !mask) | (q_minus_x & mask)
 }
 
+/// FIPS 204 `eta`. Closed enum so an unsupported value can't reach
+/// the per-byte rejection samplers, where it would otherwise be a
+/// runtime panic.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Eta {
+    /// `eta = 2`, used by ML-DSA-44 and ML-DSA-87.
+    Eta2,
+    /// `eta = 4`, used by ML-DSA-65.
+    Eta4,
+}
+
+impl Eta {
+    #[inline]
+    pub const fn value(self) -> u32 {
+        match self {
+            Eta::Eta2 => 2,
+            Eta::Eta4 => 4,
+        }
+    }
+}
+
+/// FIPS 204 `gamma2`. Closed enum so the Barrett reduction inside
+/// [`crate::rounding::decompose`] and [`crate::rounding::use_hint`]
+/// never silently falls through to the wrong denominator.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Gamma2 {
+    /// `(Q - 1) / 88`, used by ML-DSA-44.
+    G88,
+    /// `(Q - 1) / 32`, used by ML-DSA-65 and ML-DSA-87.
+    G32,
+}
+
+impl Gamma2 {
+    #[inline]
+    pub const fn value(self) -> u32 {
+        match self {
+            Gamma2::G88 => (Q - 1) / 88,
+            Gamma2::G32 => (Q - 1) / 32,
+        }
+    }
+
+    /// `floor(2^32 / (2 * gamma2))` — the Barrett factor for the
+    /// `% (2 * gamma2)` reduction in `Decompose`.
+    #[inline]
+    pub const fn barrett_factor(self) -> u32 {
+        ((1u64 << 32) / (2 * self.value() as u64)) as u32
+    }
+
+    /// `(q - 1) / (2 * gamma2)` — the `m` in `UseHint`'s modular
+    /// adjustments.
+    #[inline]
+    pub const fn use_hint_m(self) -> u32 {
+        (Q - 1) / (2 * self.value())
+    }
+}
+
 /// Per-set ML-DSA constants. `K` (rows) and `L` (columns) are const
 /// generics so `PolyVec` / `PolyMatrix` sizes specialize at compile
 /// time.
 pub struct Params<const K: usize, const L: usize> {
-    pub eta: u32,
+    pub eta: Eta,
     pub tau: usize,
     pub beta: u32,
     pub gamma1: u32,
     pub gamma1_bits: usize,
-    pub gamma2: u32,
+    pub gamma2: Gamma2,
     pub omega: usize,
     pub lambda: usize,
     pub w1_bits: usize,
@@ -119,12 +175,12 @@ const fn sig_bytes(k: usize, l: usize, lambda: usize, gamma1_bits: usize, omega:
 
 /// ML-DSA-44 (k=4, l=4, eta=2, gamma1=2^17, gamma2=(q-1)/88).
 pub const ML_DSA_44: Params<4, 4> = Params {
-    eta: 2,
+    eta: Eta::Eta2,
     tau: 39,
     beta: 39 * 2,
     gamma1: 1 << 17,
     gamma1_bits: 17,
-    gamma2: (Q - 1) / 88,
+    gamma2: Gamma2::G88,
     omega: 80,
     lambda: 128,
     w1_bits: 6,
@@ -136,12 +192,12 @@ pub const ML_DSA_44: Params<4, 4> = Params {
 
 /// ML-DSA-65 (k=6, l=5, eta=4, gamma1=2^19, gamma2=(q-1)/32).
 pub const ML_DSA_65: Params<6, 5> = Params {
-    eta: 4,
+    eta: Eta::Eta4,
     tau: 49,
     beta: 49 * 4,
     gamma1: 1 << 19,
     gamma1_bits: 19,
-    gamma2: (Q - 1) / 32,
+    gamma2: Gamma2::G32,
     omega: 55,
     lambda: 192,
     w1_bits: 4,
@@ -153,12 +209,12 @@ pub const ML_DSA_65: Params<6, 5> = Params {
 
 /// ML-DSA-87 (k=8, l=7, eta=2, gamma1=2^19, gamma2=(q-1)/32).
 pub const ML_DSA_87: Params<8, 7> = Params {
-    eta: 2,
+    eta: Eta::Eta2,
     tau: 60,
     beta: 60 * 2,
     gamma1: 1 << 19,
     gamma1_bits: 19,
-    gamma2: (Q - 1) / 32,
+    gamma2: Gamma2::G32,
     omega: 75,
     lambda: 256,
     w1_bits: 4,
@@ -173,11 +229,11 @@ pub mod ml_dsa_44 {
 
     pub const K: usize = 4;
     pub const L: usize = 4;
-    pub const ETA: u32 = ML_DSA_44.eta;
+    pub const ETA: Eta = ML_DSA_44.eta;
     pub const TAU: usize = ML_DSA_44.tau;
     pub const BETA: u32 = ML_DSA_44.beta;
     pub const GAMMA1: u32 = ML_DSA_44.gamma1;
-    pub const GAMMA2: u32 = ML_DSA_44.gamma2;
+    pub const GAMMA2: Gamma2 = ML_DSA_44.gamma2;
     pub const OMEGA: usize = ML_DSA_44.omega;
     pub const LAMBDA: usize = ML_DSA_44.lambda;
     pub const GAMMA1_BITS: usize = ML_DSA_44.gamma1_bits;

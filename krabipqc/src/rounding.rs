@@ -12,38 +12,8 @@
 
 use modmath::basic::pre_reduced as pr;
 
-use crate::params::{D, N, Q};
+use crate::params::{D, Gamma2, N, Q};
 use crate::polyvec::PolyVec;
-
-// Only two `gamma2` values appear across ML-DSA-44/65/87, so the
-// Barrett factor and the UseHint divisor are precomputed for each.
-
-const GAMMA2_88: u32 = (Q - 1) / 88;
-const GAMMA2_32: u32 = (Q - 1) / 32;
-
-const BF_2GAMMA2_88: u32 = ((1u64 << 32) / (2 * GAMMA2_88) as u64) as u32;
-const BF_2GAMMA2_32: u32 = ((1u64 << 32) / (2 * GAMMA2_32) as u64) as u32;
-
-const USE_HINT_M_88: u32 = (Q - 1) / (2 * GAMMA2_88);
-const USE_HINT_M_32: u32 = (Q - 1) / (2 * GAMMA2_32);
-
-/// Pick the Barrett factor matching `gamma2` via a branchless mask
-/// blend so the choice doesn't leak through timing.
-#[inline(always)]
-const fn barrett_2gamma2(gamma2: u32) -> u32 {
-    let is_88 = (gamma2 == GAMMA2_88) as u32;
-    let mask_88 = 0u32.wrapping_sub(is_88);
-    (BF_2GAMMA2_88 & mask_88) | (BF_2GAMMA2_32 & !mask_88)
-}
-
-/// Pick `(q-1)/(2*gamma2)` (the `m` in UseHint) via the same
-/// branchless blend.
-#[inline(always)]
-const fn use_hint_m(gamma2: u32) -> u32 {
-    let is_88 = (gamma2 == GAMMA2_88) as u32;
-    let mask_88 = 0u32.wrapping_sub(is_88);
-    (USE_HINT_M_88 & mask_88) | (USE_HINT_M_32 & !mask_88)
-}
 
 /// Constant-time `(x / two_g, x % two_g)` via Barrett reduction.
 /// Caller-supplied `bf` must be the Barrett factor for `two_g`; `x`
@@ -97,15 +67,14 @@ pub fn power2round_vec<const K: usize>(t: &PolyVec<u32, K>) -> (PolyVec<u32, K>,
 /// Decompose (FIPS 204 Alg 36). Returns `(r1, r0)` with `r1` in
 /// `[0, (q-1)/(2*gamma2))` and `r0` the canonical Z_q rep of the
 /// centered low part.
-pub fn decompose(r: u32, gamma2: u32) -> (u32, u32) {
-    debug_assert!(r < Q);
-    debug_assert!(gamma2 == GAMMA2_88 || gamma2 == GAMMA2_32);
-    let two_g = 2 * gamma2;
-    let bf = barrett_2gamma2(gamma2);
+pub fn decompose(r: u32, gamma2: Gamma2) -> (u32, u32) {
+    let g = gamma2.value();
+    let two_g = 2 * g;
+    let bf = gamma2.barrett_factor();
 
     let (_, r0_u) = barrett_div_rem(r, two_g, bf);
 
-    let sign_neg = (gamma2.wrapping_sub(r0_u) >> 31) & 1;
+    let sign_neg = (g.wrapping_sub(r0_u) >> 31) & 1;
     let sign_mask = 0u32.wrapping_sub(sign_neg);
 
     let neg_r0 = Q.wrapping_sub(two_g.wrapping_sub(r0_u));
@@ -130,19 +99,19 @@ pub fn decompose(r: u32, gamma2: u32) -> (u32, u32) {
 
 /// HighBits (FIPS 204 Alg 37): the `r1` half of [`decompose`].
 #[inline]
-pub fn high_bits(r: u32, gamma2: u32) -> u32 {
+pub fn high_bits(r: u32, gamma2: Gamma2) -> u32 {
     decompose(r, gamma2).0
 }
 
 /// LowBits (FIPS 204 Alg 38): the `r0` half of [`decompose`].
 #[inline]
-pub fn low_bits(r: u32, gamma2: u32) -> u32 {
+pub fn low_bits(r: u32, gamma2: Gamma2) -> u32 {
     decompose(r, gamma2).1
 }
 
 /// MakeHint (FIPS 204 Alg 39): returns 1 iff
 /// `HighBits(r + z) != HighBits(r)`. `z` and `r` are canonical Z_q reps.
-pub fn make_hint(z: u32, r: u32, gamma2: u32) -> u8 {
+pub fn make_hint(z: u32, r: u32, gamma2: Gamma2) -> u8 {
     let r1 = high_bits(r, gamma2);
     let v1 = high_bits(pr::add::<u32>(r, z, Q), gamma2);
     let diff = r1 ^ v1;
@@ -151,9 +120,8 @@ pub fn make_hint(z: u32, r: u32, gamma2: u32) -> u8 {
 
 /// UseHint (FIPS 204 Alg 40). The `% m` spec ops collapse to a single
 /// conditional subtract because the dividends sit in `[0, 2m)`.
-pub fn use_hint(h: u32, r: u32, gamma2: u32) -> u32 {
-    debug_assert!(gamma2 == GAMMA2_88 || gamma2 == GAMMA2_32);
-    let m = use_hint_m(gamma2);
+pub fn use_hint(h: u32, r: u32, gamma2: Gamma2) -> u32 {
+    let m = gamma2.use_hint_m();
     let (r1, r0) = decompose(r, gamma2);
 
     let h_bit = h & 1;
@@ -185,14 +153,15 @@ mod tests {
     #[test]
     fn decompose_recombines() {
         let g = GAMMA2;
-        for &r in &[0u32, 1, g, 2 * g, Q / 2, Q - 1, Q - 2] {
+        let gv = g.value();
+        for &r in &[0u32, 1, gv, 2 * gv, Q / 2, Q - 1, Q - 2] {
             let (r1, r0) = decompose(r, g);
             let r0_signed = to_signed(r0, Q);
-            let r1_2g = pr::mul::<u32>(r1, 2 * g, Q);
+            let r1_2g = pr::mul::<u32>(r1, 2 * gv, Q);
             let recomb = pr::add::<u32>(r1_2g, from_signed(r0_signed, Q), Q);
             assert_eq!(recomb, r);
-            assert!(r1 < (Q - 1) / (2 * g));
-            assert!(r0_signed.unsigned_abs() <= g);
+            assert!(r1 < (Q - 1) / (2 * gv));
+            assert!(r0_signed.unsigned_abs() <= gv);
         }
     }
 
@@ -288,10 +257,11 @@ mod tests {
 
     #[test]
     fn make_hint_matches_reference() {
-        let g = (Q - 1) / 88;
+        let g = Gamma2::G88;
+        let gv = g.value();
         for r in (0..Q).step_by(2003) {
-            for &z in &[0u32, 1, Q - 1, g, Q - g] {
-                assert_eq!(make_hint(z, r, g), ref_make_hint(z, r, g));
+            for &z in &[0u32, 1, Q - 1, gv, Q - gv] {
+                assert_eq!(make_hint(z, r, g), ref_make_hint(z, r, gv));
             }
         }
     }
@@ -299,6 +269,7 @@ mod tests {
     #[test]
     fn make_use_hint_roundtrip() {
         let g = GAMMA2;
+        let gv = g.value();
         let mut rng_state: u64 = 0xfeedfacecafebeef;
         let mut rng = || {
             rng_state = rng_state
@@ -308,7 +279,7 @@ mod tests {
         };
         for _ in 0..200 {
             let r = rng();
-            let z_signed = ((rng() as i64 % (g as i64)) - (g as i64 / 2)) as i32;
+            let z_signed = ((rng() as i64 % (gv as i64)) - (gv as i64 / 2)) as i32;
             let z = crate::params::from_signed(z_signed, Q);
             let h = make_hint(z, r, g);
             let recovered = use_hint(h as u32, r, g);
@@ -319,19 +290,21 @@ mod tests {
 
     #[test]
     fn decompose_matches_reference_dense() {
-        for &g in &[((Q - 1) / 88), ((Q - 1) / 32)] {
+        for &g in &[Gamma2::G88, Gamma2::G32] {
+            let gv = g.value();
             for r in (0..Q).step_by(503) {
-                assert_eq!(decompose(r, g), ref_decompose(r, g), "r={} g={}", r, g);
+                assert_eq!(decompose(r, g), ref_decompose(r, gv), "r={} g={}", r, gv);
             }
         }
     }
 
     #[test]
     fn use_hint_matches_reference() {
-        let g = (Q - 1) / 88;
+        let g = Gamma2::G88;
+        let gv = g.value();
         for r in (0..Q).step_by(1009) {
             for h in 0..2u32 {
-                assert_eq!(use_hint(h, r, g), ref_use_hint(h, r, g), "h={} r={}", h, r);
+                assert_eq!(use_hint(h, r, g), ref_use_hint(h, r, gv), "h={} r={}", h, r);
             }
         }
     }

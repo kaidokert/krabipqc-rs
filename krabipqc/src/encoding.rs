@@ -32,7 +32,6 @@ pub(crate) const fn bitlen(mut a: u32) -> usize {
 
 /// SimpleBitPack (FIPS 204 Alg 16). Output length: `32 * c_bits` bytes.
 pub(crate) fn simple_bit_pack(p: &Poly<u32>, c_bits: usize, out: &mut [u8]) {
-    debug_assert!(out.len() * 8 >= N * c_bits);
     out.fill(0);
     let mut acc: u64 = 0;
     let mut bits_in_acc: u32 = 0;
@@ -85,7 +84,6 @@ pub(crate) fn bit_unpack(bytes: &[u8], b: u32, c_bits: usize) -> Poly<u32> {
 /// `c_bits` from `bitlen(a + b)` and we only need `b` to recover the
 /// centered value.
 pub(crate) fn bit_pack(p: &Poly<u32>, b: u32, c_bits: usize, out: &mut [u8]) {
-    debug_assert!(out.len() * 8 >= N * c_bits);
     out.fill(0);
     let mut acc: u64 = 0;
     let mut bits_in_acc: u32 = 0;
@@ -254,7 +252,7 @@ pub fn sk_encode<const K: usize, const L: usize>(
     out[32..64].copy_from_slice(big_k);
     out[64..128].copy_from_slice(tr);
 
-    let eta = params.eta;
+    let eta = params.eta.value();
     let eta_bits = bitlen(2 * eta);
     let s_chunk = 32 * eta_bits;
     let mut off = 128;
@@ -292,7 +290,7 @@ pub fn sk_decode<const K: usize, const L: usize>(
     big_k.copy_from_slice(&sk[32..64]);
     tr.copy_from_slice(&sk[64..128]);
 
-    let eta = params.eta;
+    let eta = params.eta.value();
     let eta_bits = bitlen(2 * eta);
     let s_chunk = 32 * eta_bits;
     let mut off = 128;
@@ -349,15 +347,16 @@ mod tests {
 
     #[test]
     fn bit_pack_unpack_eta() {
-        let c_bits = bitlen(2 * ETA);
+        let eta = ETA.value();
+        let c_bits = bitlen(2 * eta);
         let mut p = Poly::<u32>::zero();
         for j in 0..N {
-            let s = (j as i32 % (2 * ETA as i32 + 1)) - ETA as i32;
+            let s = (j as i32 % (2 * eta as i32 + 1)) - eta as i32;
             p.coeffs[j] = from_signed(s, Q);
         }
         let mut buf = vec![0u8; 32 * c_bits];
-        bit_pack(&p, ETA, c_bits, &mut buf);
-        let q = bit_unpack(&buf, ETA, c_bits);
+        bit_pack(&p, eta, c_bits, &mut buf);
+        let q = bit_unpack(&buf, eta, c_bits);
         assert_eq!(q, p);
     }
 
@@ -406,15 +405,16 @@ mod tests {
         let mut s1 = PolyVec::<u32, LL>::zero();
         let mut s2 = PolyVec::<u32, KK>::zero();
         let mut t0 = PolyVec::<u32, KK>::zero();
+        let eta = p.eta.value() as i32;
         for i in 0..LL {
             for j in 0..N {
-                let s = ((i + j) as i32 % (2 * p.eta as i32 + 1)) - p.eta as i32;
+                let s = ((i + j) as i32 % (2 * eta + 1)) - eta;
                 s1.v[i].coeffs[j] = from_signed(s, Q);
             }
         }
         for i in 0..KK {
             for j in 0..N {
-                let s = ((i + j + 5) as i32 % (2 * p.eta as i32 + 1)) - p.eta as i32;
+                let s = ((i + j + 5) as i32 % (2 * eta + 1)) - eta;
                 s2.v[i].coeffs[j] = from_signed(s, Q);
                 let t = (((j as i32) % (1 << D)) - (1 << (D - 1))) + 1;
                 let t = t.clamp(-(1 << (D - 1)) + 1, 1 << (D - 1));
