@@ -1,0 +1,1 @@
+{"vsId": 42, "algorithm": "ML-DSA", "mode": "sigVer", "revision": "FIPS204", "isSample": false, "testGroups": [{"tgId": 10, "tests": [{"tcId": 140, "testPassed": false}, {"tcId": 141, "testPassed": true}, {"tcId": 142, "testPassed": true}, {"tcId": 149, "testPassed": false}, {"tcId": 150, "testPassed": false}]}]}
