@@ -84,8 +84,8 @@ impl Eta {
 }
 
 /// FIPS 204 `gamma2`. Closed enum so the Barrett reduction inside
-/// [`crate::rounding::decompose`] and [`crate::rounding::use_hint`]
-/// never silently falls through to the wrong denominator.
+/// the `decompose` / `use_hint` rounding helpers never silently falls
+/// through to the wrong denominator.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Gamma2 {
     /// `(Q - 1) / 88`, used by ML-DSA-44.
