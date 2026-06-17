@@ -24,17 +24,17 @@
 //! subtractions, producing byte-identical accept/reject decisions to
 //! the default `verify`.
 
-pub mod encoding;
-pub mod field_ext;
+pub(crate) mod encoding;
+pub(crate) mod field_ext;
 pub mod hashing;
-pub mod internal;
+pub(crate) mod internal;
 mod ml_dsa;
-pub mod ntt;
+pub(crate) mod ntt;
 pub mod params;
 pub mod poly;
 pub mod polyvec;
-pub mod rounding;
-pub mod sampling;
+pub(crate) mod rounding;
+pub(crate) mod sampling;
 
 pub use ml_dsa::{ml_dsa_44, ml_dsa_65, ml_dsa_87};
 

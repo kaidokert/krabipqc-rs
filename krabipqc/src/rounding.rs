@@ -1,7 +1,6 @@
 //! Rounding helpers used by ML-DSA verify (FIPS 204 §8): [`decompose`]
-//! / [`high_bits`] / [`low_bits`] for the `r1` recovery from
-//! `A·z − c·t1·2^d`, and [`use_hint`] for folding the signature hint
-//! into the recovered `w1`.
+//! for the `r1` recovery from `A·z − c·t1·2^d`, and [`use_hint`] for
+//! folding the signature hint into the recovered `w1`.
 //!
 //! Per-coefficient timing is independent of the input: the sign
 //! selects are branchless mask blends, and `% (2*gamma2)` /
@@ -91,14 +90,6 @@ pub fn decompose(r: u32, gamma2: u32) -> (u32, u32) {
     (r1, r0_canon)
 }
 
-pub fn high_bits(r: u32, gamma2: u32) -> u32 {
-    decompose(r, gamma2).0
-}
-
-pub fn low_bits(r: u32, gamma2: u32) -> u32 {
-    decompose(r, gamma2).1
-}
-
 /// UseHint (FIPS 204 Alg 40). The `% m` spec ops collapse to a single
 /// conditional subtract because the dividends sit in `[0, 2m)`.
 pub fn use_hint(h: u32, r: u32, gamma2: u32) -> u32 {
@@ -143,15 +134,6 @@ mod tests {
             assert_eq!(recomb, r);
             assert!(r1 < (Q - 1) / (2 * g));
             assert!(r0_signed.unsigned_abs() <= g);
-        }
-    }
-
-    #[test]
-    fn high_low_bits_consistency() {
-        let g = GAMMA2;
-        for r in (0..Q).step_by(101) {
-            assert_eq!(high_bits(r, g), decompose(r, g).0);
-            assert_eq!(low_bits(r, g), decompose(r, g).1);
         }
     }
 

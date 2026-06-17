@@ -54,21 +54,8 @@ pub(crate) fn simple_bit_unpack(bytes: &[u8], c_bits: usize) -> Poly<u32> {
 
 /// BitUnpack (FIPS 204 Alg 19). Thin wrapper over
 /// [`bit_unpack_signed`] kept in this module for naming symmetry.
-pub(crate) fn bit_unpack(bytes: &[u8], a: u32, b: u32, c_bits: usize) -> Poly<u32> {
-    bit_unpack_signed(bytes, a, b, c_bits)
-}
-
-/// w1Encode (FIPS 204 Alg 28). Output: `32 * w1_bits * K` bytes.
-pub fn w1_encode<const K: usize>(
-    w1: &crate::polyvec::PolyVec<u32, K>,
-    w1_bits: usize,
-    out: &mut [u8],
-) {
-    let chunk = 32 * w1_bits;
-    debug_assert_eq!(out.len(), K * chunk);
-    for i in 0..K {
-        simple_bit_pack(&w1.v[i], w1_bits, &mut out[i * chunk..(i + 1) * chunk]);
-    }
+pub(crate) fn bit_unpack(bytes: &[u8], b: u32, c_bits: usize) -> Poly<u32> {
+    bit_unpack_signed(bytes, b, c_bits)
 }
 
 /// `i`-th `t1` row decoded straight from `pk`, without touching the
@@ -88,9 +75,7 @@ pub fn sig_z_row<const K: usize, const L: usize>(
     let z_bits = 1 + params.gamma1_bits;
     let z_chunk = 32 * z_bits;
     let off = params.ctilde_bytes + i * z_chunk;
-    let a = params.gamma1 - 1;
-    let b = params.gamma1;
-    bit_unpack(&sig[off..off + z_chunk], a, b, z_bits)
+    bit_unpack(&sig[off..off + z_chunk], params.gamma1, z_bits)
 }
 
 /// Subslice of `sig` covering the encoded hint, suitable for
@@ -164,8 +149,7 @@ pub fn validate_hint_bytes<const K: usize>(hint: &[u8], omega: usize) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::params::ml_dsa_44::{K, W1_BITS};
-    use crate::polyvec::PolyVec;
+    use crate::params::ml_dsa_44::W1_BITS;
 
     #[test]
     fn simple_bit_pack_unpack_roundtrip() {
@@ -178,23 +162,5 @@ mod tests {
         simple_bit_pack(&p, W1_BITS, &mut buf);
         let q = simple_bit_unpack(&buf, W1_BITS);
         assert_eq!(q, p);
-    }
-
-    #[test]
-    fn w1_encode_size() {
-        let mut w1 = PolyVec::<u32, K>::zero();
-        for i in 0..K {
-            for j in 0..N {
-                w1.v[i].coeffs[j] = (i as u32 * 31 + j as u32) & ((1u32 << W1_BITS) - 1);
-            }
-        }
-        let mut buf = vec![0u8; K * 32 * W1_BITS];
-        w1_encode(&w1, W1_BITS, &mut buf);
-        let mut got = PolyVec::<u32, K>::zero();
-        let chunk = 32 * W1_BITS;
-        for i in 0..K {
-            got.v[i] = simple_bit_unpack(&buf[i * chunk..(i + 1) * chunk], W1_BITS);
-        }
-        assert_eq!(got, w1);
     }
 }

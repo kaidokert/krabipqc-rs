@@ -77,8 +77,10 @@ pub fn sample_in_ball(rho: &[u8], tau: usize) -> DPoly {
 }
 
 /// BitUnpack (FIPS 204 Alg 18) for the signed range
-/// `[b - 2^c + 1, b]`; outputs canonical Z_q reps.
-pub fn bit_unpack_signed(bytes: &[u8], _a: u32, b: u32, c_bits: usize) -> DPoly {
+/// `[b - 2^c + 1, b]`; outputs canonical Z_q reps. The `a` argument of
+/// the FIPS API is implicit (`a = 2^c - 1 - b`) since verify only
+/// decodes ranges with that shape.
+pub fn bit_unpack_signed(bytes: &[u8], b: u32, c_bits: usize) -> DPoly {
     let mut out = DPoly::zero();
     debug_assert!(bytes.len() * 8 >= N * c_bits);
     let mask = (1u32 << c_bits) - 1;

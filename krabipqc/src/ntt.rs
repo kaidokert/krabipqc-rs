@@ -7,7 +7,9 @@ use fixed_bigint::Personality;
 use modmath::basic::pre_reduced as pr;
 
 use crate::field_ext::FieldExt;
-use crate::params::{N, Q, Q_N_PRIME, Q_R2_MOD_Q, ZETA};
+#[cfg(test)]
+use crate::params::ZETA;
+use crate::params::{N, Q, Q_N_PRIME, Q_R2_MOD_Q};
 use crate::poly::Poly;
 
 // ML-DSA-pinned shims so the NTT bodies don't restate the modulus
@@ -29,7 +31,9 @@ fn sub_mont<P: FieldExt<P> + Personality>(a: u32, b: u32) -> u32 {
     <P as FieldExt<P>>::sub_mont(a, b, Q)
 }
 
-/// Bit-reverse the low 8 bits of `i`.
+/// Bit-reverse the low 8 bits of `i`. Used by the [`ZETAS_MONT`]
+/// cross-check; the NTT bodies index the precomputed table directly.
+#[cfg(test)]
 #[inline]
 const fn bitrev8(mut i: u32) -> u32 {
     i = ((i & 0xF0) >> 4) | ((i & 0x0F) << 4);
@@ -38,11 +42,11 @@ const fn bitrev8(mut i: u32) -> u32 {
     i
 }
 
-/// `ZETAS[i] = ZETA^bitrev8(i) mod Q`. Hardcoded to skip 256 modular
-/// exponentiations per NTT call; cross-checked against
-/// [`compute_zetas`] in a unit test below.
+/// Canonical `ZETAS[i] = ZETA^bitrev8(i) mod Q`; the Mont-form
+/// [`ZETAS_MONT`] is what the hot path indexes.
+#[cfg(test)]
 #[rustfmt::skip]
-pub const ZETAS: [u32; 256] = [
+const ZETAS: [u32; 256] = [
           1, 4808194, 3765607, 3761513, 5178923, 5496691, 5234739, 5178987,
     7778734, 3542485, 2682288, 2129892, 3764867, 7375178,  557458, 7159240,
     5010068, 4317364, 2663378, 6705802, 4855975, 7946292,  676590, 7044481,
@@ -77,9 +81,10 @@ pub const ZETAS: [u32; 256] = [
     8077412, 3531229, 4405932, 4606686, 1900052, 7598542, 1054478, 7648983,
 ];
 
-/// Recompute ZETAS. Used by the consistency test against the
-/// hardcoded [`ZETAS`]; not on the runtime hot path.
-pub fn compute_zetas() -> [u32; 256] {
+/// Recompute ZETAS from `ZETA` via modular exponentiation; used by the
+/// hardcoded-table consistency test.
+#[cfg(test)]
+fn compute_zetas() -> [u32; 256] {
     let mut z = [0u32; 256];
     for i in 0..256u32 {
         z[i as usize] = pr::exp::<u32>(ZETA, bitrev8(i), Q);
@@ -88,12 +93,11 @@ pub fn compute_zetas() -> [u32; 256] {
 }
 
 /// `256^-1 mod Q` — the post-NTT scaling factor.
-pub const N_INV: u32 = 8347681;
+const N_INV: u32 = 8347681;
 
-/// `ZETAS_MONT[i] = ZETAS[i] * R mod Q`. Cross-checked against
-/// `to_mont(ZETAS[i])` in tests.
+/// `ZETAS_MONT[i] = ZETAS[i] * R mod Q`.
 #[rustfmt::skip]
-pub const ZETAS_MONT: [u32; 256] = [
+const ZETAS_MONT: [u32; 256] = [
     4193792,   25847, 5771523, 7861508,  237124, 7602457, 7504169,  466468,
     1826347, 2353451, 8021166, 6288512, 3119733, 5495562, 3111497, 2680103,
     2725464, 1024112, 7300517, 3585928, 7830929, 7260833, 2619752, 6271868,

@@ -8,7 +8,7 @@
 //! suffix is a partial guarantee.
 
 macro_rules! per_set {
-    ($mod:ident, $params:ident, $pk:expr, $sig:expr, $doc:expr) => {
+    ($mod:ident, $params:ident, $doc:expr) => {
         #[doc = $doc]
         pub mod $mod {
             use fixed_bigint::Ct;
@@ -16,8 +16,8 @@ macro_rules! per_set {
             use crate::internal;
             use crate::params::$params;
 
-            pub const PK_BYTES: usize = $pk;
-            pub const SIG_BYTES: usize = $sig;
+            pub const PK_BYTES: usize = $params.pk_bytes;
+            pub const SIG_BYTES: usize = $params.sig_bytes;
 
             pub fn verify_internal(
                 pk: &[u8; PK_BYTES],
@@ -153,21 +153,15 @@ macro_rules! per_set {
 per_set!(
     ml_dsa_44,
     ML_DSA_44,
-    1312,
-    2420,
     "ML-DSA-44 (FIPS 204, parameter set 1): K=4, L=4, η=2, τ=39, λ=128.\n\nPublic key: 1312 B. Signature: 2420 B."
 );
 per_set!(
     ml_dsa_65,
     ML_DSA_65,
-    1952,
-    3309,
     "ML-DSA-65 (FIPS 204, parameter set 2): K=6, L=5, η=4, τ=49, λ=192.\n\nPublic key: 1952 B. Signature: 3309 B."
 );
 per_set!(
     ml_dsa_87,
     ML_DSA_87,
-    2592,
-    4627,
     "ML-DSA-87 (FIPS 204, parameter set 3): K=8, L=7, η=2, τ=60, λ=256.\n\nPublic key: 2592 B. Signature: 4627 B."
 );
