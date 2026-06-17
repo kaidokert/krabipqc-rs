@@ -86,6 +86,10 @@ impl<const K: usize, const L: usize> Params<K, L> {
     pub const L: usize = L;
 }
 
+/// SHAKE-256 expansion buffer for keygen's seed bundle
+/// `(rho | rho_prime | big_k)` = 32 + 64 + 32 bytes.
+pub const SEED_EXPAND_BYTES: usize = 128;
+
 /// Worst-case ctilde length across all three sets (`lambda/4` at
 /// `lambda = 256`).
 pub const MAX_CTILDE_BYTES: usize = 64;

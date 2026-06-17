@@ -1,14 +1,34 @@
-//! ML-DSA byte / bit encoding routines used by verify (FIPS 204 §7).
+//! ML-DSA byte / bit encoding (FIPS 204 §7).
 //!
-//! Streaming accessors ([`pk_t1_row`], [`sig_z_row`],
-//! [`sig_hint_slice`], [`h_bit`], [`h_weight`]) read one polynomial
-//! / one hint coefficient at a time straight from the input slice so
-//! verify can run the matrix-vector multiply without materializing a
-//! full `PolyVec<K>` scratch.
+//! Three families:
+//!
+//! * Bit packers / unpackers: [`simple_bit_pack`] / [`simple_bit_unpack`]
+//!   for unsigned ranges, [`bit_pack`] / [`bit_unpack`] for centered
+//!   ranges via [`crate::sampling::bit_unpack_signed`].
+//! * Public/secret-key codecs: [`pk_encode`], [`sk_encode`] /
+//!   [`sk_decode`]. Sign streams z + hint directly into the sig
+//!   buffer rather than going through a `sig_encode` round-trip.
+//! * Verify-side streaming accessors: [`pk_t1_row`], [`sig_z_row`],
+//!   [`sig_hint_slice`], [`h_row_positions`], [`h_weight`],
+//!   [`validate_hint_bytes`]. Let verify read one polynomial or one
+//!   hint coefficient at a time without materializing a full
+//!   `PolyVec<K>` scratch.
 
-use crate::params::{N, Params};
+use crate::params::{D, N, Params, Q, to_signed};
 use crate::poly::Poly;
+use crate::polyvec::PolyVec;
 use crate::sampling::bit_unpack_signed;
+
+/// `ceil(log2(a+1))` — minimum unsigned bit count for representing `a`.
+#[inline]
+pub(crate) const fn bitlen(mut a: u32) -> usize {
+    let mut n = 0;
+    while a > 0 {
+        n += 1;
+        a >>= 1;
+    }
+    n
+}
 
 /// SimpleBitPack (FIPS 204 Alg 16). Output length: `32 * c_bits` bytes.
 pub(crate) fn simple_bit_pack(p: &Poly<u32>, c_bits: usize, out: &mut [u8]) {
@@ -56,6 +76,33 @@ pub(crate) fn simple_bit_unpack(bytes: &[u8], c_bits: usize) -> Poly<u32> {
 /// [`bit_unpack_signed`] kept in this module for naming symmetry.
 pub(crate) fn bit_unpack(bytes: &[u8], b: u32, c_bits: usize) -> Poly<u32> {
     bit_unpack_signed(bytes, b, c_bits)
+}
+
+/// BitPack (FIPS 204 Alg 17): pack 256 canonical-Z_q coefficients with
+/// centered values in `[-a, b]` using `c = bitlen(a + b)` bits each.
+/// Each coefficient is stored as `zp = b - centered ∈ [0, a + b]`.
+pub(crate) fn bit_pack(p: &Poly<u32>, a: u32, b: u32, c_bits: usize, out: &mut [u8]) {
+    debug_assert!(out.len() * 8 >= N * c_bits);
+    out.fill(0);
+    let mut acc: u64 = 0;
+    let mut bits_in_acc: u32 = 0;
+    let mut byte_idx = 0;
+    for &canon in &p.coeffs {
+        let centered = to_signed(canon, Q) as i64;
+        let zp = (b as i64) - centered;
+        debug_assert!((0..=(a as i64 + b as i64)).contains(&zp));
+        acc |= (zp as u64) << bits_in_acc;
+        bits_in_acc += c_bits as u32;
+        while bits_in_acc >= 8 {
+            out[byte_idx] = acc as u8;
+            byte_idx += 1;
+            acc >>= 8;
+            bits_in_acc -= 8;
+        }
+    }
+    if bits_in_acc > 0 {
+        out[byte_idx] = acc as u8;
+    }
 }
 
 /// `i`-th `t1` row decoded straight from `pk`, without touching the
@@ -146,10 +193,126 @@ pub fn validate_hint_bytes<const K: usize>(hint: &[u8], omega: usize) -> bool {
     true
 }
 
+/// Decoded secret-key components produced by [`sk_decode`].
+pub type DecodedSk<const K: usize, const L: usize> = (
+    [u8; 32],
+    [u8; 32],
+    [u8; 64],
+    PolyVec<u32, L>,
+    PolyVec<u32, K>,
+    PolyVec<u32, K>,
+);
+
+/// pkEncode (FIPS 204 Alg 22). Output length: `32 + 32 * K * 10`.
+pub fn pk_encode<const K: usize>(rho: &[u8; 32], t1: &PolyVec<u32, K>, out: &mut [u8]) {
+    debug_assert_eq!(out.len(), 32 + 32 * K * 10);
+    out[..32].copy_from_slice(rho);
+    // bitlen(q-1) - d = 23 - 13 = 10.
+    let c_bits = 10;
+    let chunk = 32 * c_bits;
+    for i in 0..K {
+        let start = 32 + i * chunk;
+        simple_bit_pack(&t1.v[i], c_bits, &mut out[start..start + chunk]);
+    }
+}
+
+/// skEncode (FIPS 204 Alg 24). Output length: `params.sk_bytes`.
+#[allow(clippy::too_many_arguments)]
+pub fn sk_encode<const K: usize, const L: usize>(
+    params: &Params<K, L>,
+    rho: &[u8; 32],
+    big_k: &[u8; 32],
+    tr: &[u8; 64],
+    s1: &PolyVec<u32, L>,
+    s2: &PolyVec<u32, K>,
+    t0: &PolyVec<u32, K>,
+    out: &mut [u8],
+) {
+    debug_assert_eq!(out.len(), params.sk_bytes);
+    out[..32].copy_from_slice(rho);
+    out[32..64].copy_from_slice(big_k);
+    out[64..128].copy_from_slice(tr);
+
+    let eta = params.eta;
+    let eta_bits = bitlen(2 * eta);
+    let s_chunk = 32 * eta_bits;
+    let mut off = 128;
+    for i in 0..L {
+        bit_pack(&s1.v[i], eta, eta, eta_bits, &mut out[off..off + s_chunk]);
+        off += s_chunk;
+    }
+    for i in 0..K {
+        bit_pack(&s2.v[i], eta, eta, eta_bits, &mut out[off..off + s_chunk]);
+        off += s_chunk;
+    }
+    let t0_a = (1u32 << (D - 1)) - 1;
+    let t0_b = 1u32 << (D - 1);
+    let t0_bits = bitlen(t0_a + t0_b);
+    let t0_chunk = 32 * t0_bits;
+    for i in 0..K {
+        bit_pack(&t0.v[i], t0_a, t0_b, t0_bits, &mut out[off..off + t0_chunk]);
+        off += t0_chunk;
+    }
+    debug_assert_eq!(off, params.sk_bytes);
+}
+
+/// skDecode (FIPS 204 Alg 25).
+pub fn sk_decode<const K: usize, const L: usize>(
+    params: &Params<K, L>,
+    sk: &[u8],
+) -> Option<DecodedSk<K, L>> {
+    if sk.len() != params.sk_bytes {
+        return None;
+    }
+    let mut rho = [0u8; 32];
+    let mut big_k = [0u8; 32];
+    let mut tr = [0u8; 64];
+    rho.copy_from_slice(&sk[..32]);
+    big_k.copy_from_slice(&sk[32..64]);
+    tr.copy_from_slice(&sk[64..128]);
+
+    let eta = params.eta;
+    let eta_bits = bitlen(2 * eta);
+    let s_chunk = 32 * eta_bits;
+    let mut off = 128;
+    let mut s1 = PolyVec::<u32, L>::zero();
+    let mut s2 = PolyVec::<u32, K>::zero();
+    for i in 0..L {
+        s1.v[i] = bit_unpack(&sk[off..off + s_chunk], eta, eta_bits);
+        off += s_chunk;
+    }
+    for i in 0..K {
+        s2.v[i] = bit_unpack(&sk[off..off + s_chunk], eta, eta_bits);
+        off += s_chunk;
+    }
+    let t0_a = (1u32 << (D - 1)) - 1;
+    let t0_b = 1u32 << (D - 1);
+    let t0_bits = bitlen(t0_a + t0_b);
+    let t0_chunk = 32 * t0_bits;
+    let mut t0 = PolyVec::<u32, K>::zero();
+    for i in 0..K {
+        t0.v[i] = bit_unpack(&sk[off..off + t0_chunk], t0_b, t0_bits);
+        off += t0_chunk;
+    }
+    debug_assert_eq!(off, params.sk_bytes);
+    Some((rho, big_k, tr, s1, s2, t0))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::params::ml_dsa_44::W1_BITS;
+    use crate::params::ml_dsa_44::{ETA, GAMMA1, GAMMA1_BITS, K, OMEGA, W1_BITS};
+    use crate::params::{ML_DSA_44, ML_DSA_65, ML_DSA_87, from_signed};
+
+    #[test]
+    fn bitlen_basic() {
+        assert_eq!(bitlen(0), 0);
+        assert_eq!(bitlen(1), 1);
+        assert_eq!(bitlen(2), 2);
+        assert_eq!(bitlen(3), 2);
+        assert_eq!(bitlen(255), 8);
+        assert_eq!(bitlen(256), 9);
+    }
 
     #[test]
     fn simple_bit_pack_unpack_roundtrip() {
@@ -162,5 +325,116 @@ mod tests {
         simple_bit_pack(&p, W1_BITS, &mut buf);
         let q = simple_bit_unpack(&buf, W1_BITS);
         assert_eq!(q, p);
+    }
+
+    #[test]
+    fn bit_pack_unpack_eta() {
+        let c_bits = bitlen(2 * ETA);
+        let mut p = Poly::<u32>::zero();
+        for j in 0..N {
+            let s = (j as i32 % (2 * ETA as i32 + 1)) - ETA as i32;
+            p.coeffs[j] = from_signed(s, Q);
+        }
+        let mut buf = vec![0u8; 32 * c_bits];
+        bit_pack(&p, ETA, ETA, c_bits, &mut buf);
+        let q = bit_unpack(&buf, ETA, c_bits);
+        assert_eq!(q, p);
+    }
+
+    #[test]
+    fn bit_pack_unpack_gamma1() {
+        let a = GAMMA1 - 1;
+        let b = GAMMA1;
+        let c_bits = 1 + GAMMA1_BITS;
+        let mut p = Poly::<u32>::zero();
+        let span = a + b + 1;
+        let mut state: u64 = 0xa5a5a5a5a5a5a5a5;
+        for j in 0..N {
+            state = state
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407);
+            let r = (state as u32) % span;
+            let s = r as i32 - a as i32;
+            p.coeffs[j] = from_signed(s, Q);
+        }
+        let mut buf = vec![0u8; 32 * c_bits];
+        bit_pack(&p, a, b, c_bits, &mut buf);
+        let q = bit_unpack(&buf, b, c_bits);
+        assert_eq!(q, p);
+    }
+
+    fn pk_t1_row_roundtrip<const KK: usize, const LL: usize>(p: &Params<KK, LL>) {
+        let rho = [7u8; 32];
+        let mut t1 = PolyVec::<u32, KK>::zero();
+        for i in 0..KK {
+            for j in 0..N {
+                t1.v[i].coeffs[j] = (i as u32 * 31 + j as u32) & 0x3FF;
+            }
+        }
+        let mut pk = vec![0u8; p.pk_bytes];
+        pk_encode(&rho, &t1, &mut pk);
+        assert_eq!(&pk[..32], &rho);
+        for i in 0..KK {
+            assert_eq!(pk_t1_row(&pk, i), t1.v[i]);
+        }
+    }
+
+    fn sk_roundtrip<const KK: usize, const LL: usize>(p: &Params<KK, LL>) {
+        let rho = [1u8; 32];
+        let big_k = [2u8; 32];
+        let tr = [3u8; 64];
+        let mut s1 = PolyVec::<u32, LL>::zero();
+        let mut s2 = PolyVec::<u32, KK>::zero();
+        let mut t0 = PolyVec::<u32, KK>::zero();
+        for i in 0..LL {
+            for j in 0..N {
+                let s = ((i + j) as i32 % (2 * p.eta as i32 + 1)) - p.eta as i32;
+                s1.v[i].coeffs[j] = from_signed(s, Q);
+            }
+        }
+        for i in 0..KK {
+            for j in 0..N {
+                let s = ((i + j + 5) as i32 % (2 * p.eta as i32 + 1)) - p.eta as i32;
+                s2.v[i].coeffs[j] = from_signed(s, Q);
+                let t = (((j as i32) % (1 << D)) - (1 << (D - 1))) + 1;
+                let t = t.clamp(-(1 << (D - 1)) + 1, 1 << (D - 1));
+                t0.v[i].coeffs[j] = from_signed(t, Q);
+            }
+        }
+        let mut sk = vec![0u8; p.sk_bytes];
+        sk_encode(p, &rho, &big_k, &tr, &s1, &s2, &t0, &mut sk);
+        let (rho2, k2, tr2, s1_2, s2_2, t0_2) = sk_decode(p, &sk).unwrap();
+        assert_eq!(rho2, rho);
+        assert_eq!(k2, big_k);
+        assert_eq!(tr2, tr);
+        assert_eq!(s1_2, s1);
+        assert_eq!(s2_2, s2);
+        assert_eq!(t0_2, t0);
+    }
+
+    #[test]
+    fn pk_roundtrip_44() {
+        pk_t1_row_roundtrip(&ML_DSA_44);
+    }
+    #[test]
+    fn pk_roundtrip_65() {
+        pk_t1_row_roundtrip(&ML_DSA_65);
+    }
+    #[test]
+    fn pk_roundtrip_87() {
+        pk_t1_row_roundtrip(&ML_DSA_87);
+    }
+
+    #[test]
+    fn sk_roundtrip_44() {
+        sk_roundtrip(&ML_DSA_44);
+    }
+    #[test]
+    fn sk_roundtrip_65() {
+        sk_roundtrip(&ML_DSA_65);
+    }
+    #[test]
+    fn sk_roundtrip_87() {
+        sk_roundtrip(&ML_DSA_87);
     }
 }
