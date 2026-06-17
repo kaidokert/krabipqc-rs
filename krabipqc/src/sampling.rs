@@ -6,6 +6,7 @@
 
 use fixed_bigint::Nct;
 
+use crate::encoding::EncodeError;
 use crate::field_ext::FieldExt;
 use crate::hashing::{Shake128Stream, Shake256Stream};
 use crate::params::{Eta, N, Q, Q_N_PRIME, Q_R2_MOD_Q, from_signed};
@@ -297,7 +298,10 @@ pub fn expand_mask<const L: usize>(
         let n_bytes = mu_r.to_le_bytes();
         let mut stream = Shake256Stream::new(&[rho_pp, &n_bytes]);
         stream.squeeze(buf);
-        out.v[r] = bit_unpack_signed(buf, gamma1, c_bits);
+        // The local `buf` is sized exactly to `bytes_per_poly`, so
+        // bit_unpack_signed always succeeds; treat any error as a
+        // crate-internal invariant violation.
+        out.v[r] = bit_unpack_signed(buf, gamma1, c_bits).expect("buf sized to c_bits");
     }
     out
 }
@@ -306,7 +310,7 @@ pub fn expand_mask<const L: usize>(
 /// `[b - 2^c + 1, b]`; outputs canonical Z_q reps. The `a` argument of
 /// the FIPS API is implicit (`a = 2^c - 1 - b`) since verify only
 /// decodes ranges with that shape.
-pub fn bit_unpack_signed(bytes: &[u8], b: u32, c_bits: usize) -> DPoly {
+pub fn bit_unpack_signed(bytes: &[u8], b: u32, c_bits: usize) -> Result<DPoly, EncodeError> {
     let mut out = DPoly::zero();
     let mask = (1u32 << c_bits) - 1;
     let mut acc: u64 = 0;
@@ -314,7 +318,8 @@ pub fn bit_unpack_signed(bytes: &[u8], b: u32, c_bits: usize) -> DPoly {
     let mut byte_idx = 0usize;
     for j in 0..N {
         while bits_in_acc < c_bits as u32 {
-            acc |= (bytes[byte_idx] as u64) << bits_in_acc;
+            let byte = *bytes.get(byte_idx).ok_or(EncodeError::BufferTooSmall)?;
+            acc |= (byte as u64) << bits_in_acc;
             byte_idx += 1;
             bits_in_acc += 8;
         }
@@ -324,7 +329,7 @@ pub fn bit_unpack_signed(bytes: &[u8], b: u32, c_bits: usize) -> DPoly {
         let signed = (b as i64) - (zp as i64);
         out.coeffs[j] = from_signed(signed as i32, Q);
     }
-    out
+    Ok(out)
 }
 
 #[cfg(test)]

@@ -246,7 +246,8 @@ pub fn sign_internal_impl_pieces<const K: usize, const L: usize, P>(
                 &w1_row,
                 params.w1_bits,
                 &mut w1_packed[i * w1_chunk..(i + 1) * w1_chunk],
-            );
+            )
+            .expect("w1_packed sized for K rows");
         }
         shake256(&[&*mu, w1_packed], c_tilde);
 
@@ -275,7 +276,8 @@ pub fn sign_internal_impl_pieces<const K: usize, const L: usize, P>(
                 z_pack_b,
                 z_pack_bits,
                 &mut sig_out[sig_z_off + i * z_chunk..sig_z_off + (i + 1) * z_chunk],
-            );
+            )
+            .expect("sig_out sized for L z rows");
         }
 
         for i in 0..K {
@@ -410,7 +412,10 @@ where
     // multiply the per-row SHAKE cost by K.
     let mut z = PolyVec::<u32, L>::zero();
     for i in 0..L {
-        z.v[i] = encoding::sig_z_row::<K, L>(params, sig, i);
+        let Ok(row) = encoding::sig_z_row::<K, L>(params, sig, i) else {
+            return false;
+        };
+        z.v[i] = row;
     }
     let z_bound = params.gamma1 - params.beta;
     for poly in z.v.iter() {
@@ -460,7 +465,9 @@ where
             row = row.add(&p, Q);
         }
 
-        let mut t1_row = encoding::pk_t1_row(pk, i);
+        let Ok(mut t1_row) = encoding::pk_t1_row(pk, i) else {
+            return false;
+        };
         for k in 0..N {
             t1_row.coeffs[k] = pr::mul::<u32>(t1_row.coeffs[k], two_d, Q);
         }
@@ -487,11 +494,15 @@ where
             row.coeffs[k] = crate::rounding::use_hint(h, row.coeffs[k], params.gamma2);
         }
 
+        // w1_packed is sized exactly to `K * w1_chunk` above, so this
+        // never fails; treat any error as a crate-internal invariant
+        // violation.
         encoding::simple_bit_pack(
             &row,
             params.w1_bits,
             &mut w1_packed[i * w1_chunk..(i + 1) * w1_chunk],
-        );
+        )
+        .expect("w1_packed sized for K rows");
     }
 
     let mut c_tilde_prime_buf = [0u8; MAX_CTILDE_BYTES];
