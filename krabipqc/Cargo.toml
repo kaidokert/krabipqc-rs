@@ -16,14 +16,14 @@ modmath = { version = "0.3.0", features = ["wide-mul", "zeroize"] }
 # SHAKE-128 / SHAKE-256 / SHA3-256 / SHA3-512 wrappers in `hashing.rs`.
 sha3 = { version = "0.10", default-features = false }
 
-# For the Personality marker types (`Nct` / `Ct`) carried by `Mont<M, P>`.
-# The Ct path uses the wide-mul + zeroize features transitively.
+# `Personality` marker types (`Nct` / `Ct`). Zeroize feature on so
+# transitively-held `FixedUInt` buffers in the wide-mul path clear on
+# drop.
 fixed-bigint = { version = "0.3", default-features = false, features = ["zeroize"] }
 
-# Constant-time primitives used by `Mont<M, Ct>` (ConditionallySelectable).
+# Constant-time primitives for the Ct personality.
 subtle = { version = "2.6", default-features = false }
 
-# `Zeroize` impls on `Poly<M>` / `PolyVec<M, LEN>`.
 zeroize = { version = "1", default-features = false }
 
 rand_core = { version = "0.10", default-features = false }

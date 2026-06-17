@@ -19,6 +19,14 @@ use crate::poly::Poly;
 use crate::polyvec::PolyVec;
 use crate::sampling::bit_unpack_signed;
 
+/// Out-of-range slice access while encoding or decoding. Used by all
+/// the bit-packers and the per-message codecs to surface malformed
+/// inputs instead of panicking.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EncodeError {
+    BufferTooSmall,
+}
+
 /// `ceil(log2(a+1))` — minimum unsigned bit count for representing `a`.
 #[inline]
 pub(crate) const fn bitlen(mut a: u32) -> usize {
@@ -31,8 +39,11 @@ pub(crate) const fn bitlen(mut a: u32) -> usize {
 }
 
 /// SimpleBitPack (FIPS 204 Alg 16). Output length: `32 * c_bits` bytes.
-pub(crate) fn simple_bit_pack(p: &Poly<u32>, c_bits: usize, out: &mut [u8]) {
-    debug_assert!(out.len() * 8 >= N * c_bits);
+pub(crate) fn simple_bit_pack(
+    p: &Poly<u32>,
+    c_bits: usize,
+    out: &mut [u8],
+) -> Result<(), EncodeError> {
     out.fill(0);
     let mut acc: u64 = 0;
     let mut bits_in_acc: u32 = 0;
@@ -41,19 +52,20 @@ pub(crate) fn simple_bit_pack(p: &Poly<u32>, c_bits: usize, out: &mut [u8]) {
         acc |= (coef as u64) << bits_in_acc;
         bits_in_acc += c_bits as u32;
         while bits_in_acc >= 8 {
-            out[byte_idx] = acc as u8;
+            *out.get_mut(byte_idx).ok_or(EncodeError::BufferTooSmall)? = acc as u8;
             byte_idx += 1;
             acc >>= 8;
             bits_in_acc -= 8;
         }
     }
     if bits_in_acc > 0 {
-        out[byte_idx] = acc as u8;
+        *out.get_mut(byte_idx).ok_or(EncodeError::BufferTooSmall)? = acc as u8;
     }
+    Ok(())
 }
 
 /// SimpleBitUnpack (FIPS 204 Alg 18): inverse of [`simple_bit_pack`].
-pub(crate) fn simple_bit_unpack(bytes: &[u8], c_bits: usize) -> Poly<u32> {
+pub(crate) fn simple_bit_unpack(bytes: &[u8], c_bits: usize) -> Result<Poly<u32>, EncodeError> {
     let mut out = Poly::<u32>::zero();
     let mask = (1u32 << c_bits) - 1;
     let mut acc: u64 = 0;
@@ -61,7 +73,8 @@ pub(crate) fn simple_bit_unpack(bytes: &[u8], c_bits: usize) -> Poly<u32> {
     let mut byte_idx = 0;
     for j in 0..N {
         while bits_in_acc < c_bits as u32 {
-            acc |= (bytes[byte_idx] as u64) << bits_in_acc;
+            let byte = *bytes.get(byte_idx).ok_or(EncodeError::BufferTooSmall)?;
+            acc |= (byte as u64) << bits_in_acc;
             byte_idx += 1;
             bits_in_acc += 8;
         }
@@ -69,12 +82,12 @@ pub(crate) fn simple_bit_unpack(bytes: &[u8], c_bits: usize) -> Poly<u32> {
         acc >>= c_bits;
         bits_in_acc -= c_bits as u32;
     }
-    out
+    Ok(out)
 }
 
 /// BitUnpack (FIPS 204 Alg 19). Thin wrapper over
 /// [`bit_unpack_signed`] kept in this module for naming symmetry.
-pub(crate) fn bit_unpack(bytes: &[u8], b: u32, c_bits: usize) -> Poly<u32> {
+pub(crate) fn bit_unpack(bytes: &[u8], b: u32, c_bits: usize) -> Result<Poly<u32>, EncodeError> {
     bit_unpack_signed(bytes, b, c_bits)
 }
 
@@ -84,8 +97,12 @@ pub(crate) fn bit_unpack(bytes: &[u8], b: u32, c_bits: usize) -> Poly<u32> {
 /// the FIPS `a` argument is implicit since the caller computes
 /// `c_bits` from `bitlen(a + b)` and we only need `b` to recover the
 /// centered value.
-pub(crate) fn bit_pack(p: &Poly<u32>, b: u32, c_bits: usize, out: &mut [u8]) {
-    debug_assert!(out.len() * 8 >= N * c_bits);
+pub(crate) fn bit_pack(
+    p: &Poly<u32>,
+    b: u32,
+    c_bits: usize,
+    out: &mut [u8],
+) -> Result<(), EncodeError> {
     out.fill(0);
     let mut acc: u64 = 0;
     let mut bits_in_acc: u32 = 0;
@@ -96,23 +113,27 @@ pub(crate) fn bit_pack(p: &Poly<u32>, b: u32, c_bits: usize, out: &mut [u8]) {
         acc |= (zp as u64) << bits_in_acc;
         bits_in_acc += c_bits as u32;
         while bits_in_acc >= 8 {
-            out[byte_idx] = acc as u8;
+            *out.get_mut(byte_idx).ok_or(EncodeError::BufferTooSmall)? = acc as u8;
             byte_idx += 1;
             acc >>= 8;
             bits_in_acc -= 8;
         }
     }
     if bits_in_acc > 0 {
-        out[byte_idx] = acc as u8;
+        *out.get_mut(byte_idx).ok_or(EncodeError::BufferTooSmall)? = acc as u8;
     }
+    Ok(())
 }
 
 /// `i`-th `t1` row decoded straight from `pk`, without touching the
 /// other rows.
-pub fn pk_t1_row(pk: &[u8], i: usize) -> Poly<u32> {
+pub fn pk_t1_row(pk: &[u8], i: usize) -> Result<Poly<u32>, EncodeError> {
     let chunk = 32 * 10;
     let start = 32 + i * chunk;
-    simple_bit_unpack(&pk[start..start + chunk], 10)
+    let slice = pk
+        .get(start..start + chunk)
+        .ok_or(EncodeError::BufferTooSmall)?;
+    simple_bit_unpack(slice, 10)
 }
 
 /// `i`-th `z` row decoded straight from `sig`.
@@ -120,11 +141,14 @@ pub fn sig_z_row<const K: usize, const L: usize>(
     params: &Params<K, L>,
     sig: &[u8],
     i: usize,
-) -> Poly<u32> {
+) -> Result<Poly<u32>, EncodeError> {
     let z_bits = 1 + params.gamma1_bits;
     let z_chunk = 32 * z_bits;
     let off = params.ctilde_bytes + i * z_chunk;
-    bit_unpack(&sig[off..off + z_chunk], params.gamma1, z_bits)
+    let slice = sig
+        .get(off..off + z_chunk)
+        .ok_or(EncodeError::BufferTooSmall)?;
+    bit_unpack(slice, params.gamma1, z_bits)
 }
 
 /// Subslice of `sig` covering the encoded hint, suitable for
@@ -205,32 +229,24 @@ pub type DecodedSk<const K: usize, const L: usize> = (
     PolyVec<u32, K>,
 );
 
-/// Output-buffer length mismatch on an encoder. The per-set facades
-/// always pass exactly-sized arrays so this never fires in practice;
-/// it's the explicit signalling path for callers that hand in raw
-/// slices.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum EncodeError {
-    BufferTooSmall,
-}
-
 /// pkEncode (FIPS 204 Alg 22). Output length: `32 + 32 * K * 10`.
 pub fn pk_encode<const K: usize>(
     rho: &[u8; 32],
     t1: &PolyVec<u32, K>,
     out: &mut [u8],
 ) -> Result<(), EncodeError> {
-    let expected = 32 + 32 * K * 10;
-    if out.len() != expected {
-        return Err(EncodeError::BufferTooSmall);
-    }
-    out[..32].copy_from_slice(rho);
+    out.get_mut(..32)
+        .ok_or(EncodeError::BufferTooSmall)?
+        .copy_from_slice(rho);
     // bitlen(q-1) - d = 23 - 13 = 10.
     let c_bits = 10;
     let chunk = 32 * c_bits;
     for i in 0..K {
         let start = 32 + i * chunk;
-        simple_bit_pack(&t1.v[i], c_bits, &mut out[start..start + chunk]);
+        let dst = out
+            .get_mut(start..start + chunk)
+            .ok_or(EncodeError::BufferTooSmall)?;
+        simple_bit_pack(&t1.v[i], c_bits, dst)?;
     }
     Ok(())
 }
@@ -247,23 +263,32 @@ pub fn sk_encode<const K: usize, const L: usize>(
     t0: &PolyVec<u32, K>,
     out: &mut [u8],
 ) -> Result<(), EncodeError> {
-    if out.len() != params.sk_bytes {
-        return Err(EncodeError::BufferTooSmall);
-    }
-    out[..32].copy_from_slice(rho);
-    out[32..64].copy_from_slice(big_k);
-    out[64..128].copy_from_slice(tr);
+    out.get_mut(..32)
+        .ok_or(EncodeError::BufferTooSmall)?
+        .copy_from_slice(rho);
+    out.get_mut(32..64)
+        .ok_or(EncodeError::BufferTooSmall)?
+        .copy_from_slice(big_k);
+    out.get_mut(64..128)
+        .ok_or(EncodeError::BufferTooSmall)?
+        .copy_from_slice(tr);
 
-    let eta = params.eta;
+    let eta = params.eta.value();
     let eta_bits = bitlen(2 * eta);
     let s_chunk = 32 * eta_bits;
     let mut off = 128;
     for i in 0..L {
-        bit_pack(&s1.v[i], eta, eta_bits, &mut out[off..off + s_chunk]);
+        let dst = out
+            .get_mut(off..off + s_chunk)
+            .ok_or(EncodeError::BufferTooSmall)?;
+        bit_pack(&s1.v[i], eta, eta_bits, dst)?;
         off += s_chunk;
     }
     for i in 0..K {
-        bit_pack(&s2.v[i], eta, eta_bits, &mut out[off..off + s_chunk]);
+        let dst = out
+            .get_mut(off..off + s_chunk)
+            .ok_or(EncodeError::BufferTooSmall)?;
+        bit_pack(&s2.v[i], eta, eta_bits, dst)?;
         off += s_chunk;
     }
     let t0_a = (1u32 << (D - 1)) - 1;
@@ -271,7 +296,10 @@ pub fn sk_encode<const K: usize, const L: usize>(
     let t0_bits = bitlen(t0_a + t0_b);
     let t0_chunk = 32 * t0_bits;
     for i in 0..K {
-        bit_pack(&t0.v[i], t0_b, t0_bits, &mut out[off..off + t0_chunk]);
+        let dst = out
+            .get_mut(off..off + t0_chunk)
+            .ok_or(EncodeError::BufferTooSmall)?;
+        bit_pack(&t0.v[i], t0_b, t0_bits, dst)?;
         off += t0_chunk;
     }
     Ok(())
@@ -281,9 +309,9 @@ pub fn sk_encode<const K: usize, const L: usize>(
 pub fn sk_decode<const K: usize, const L: usize>(
     params: &Params<K, L>,
     sk: &[u8],
-) -> Option<DecodedSk<K, L>> {
+) -> Result<DecodedSk<K, L>, EncodeError> {
     if sk.len() != params.sk_bytes {
-        return None;
+        return Err(EncodeError::BufferTooSmall);
     }
     let mut rho = [0u8; 32];
     let mut big_k = [0u8; 32];
@@ -292,18 +320,24 @@ pub fn sk_decode<const K: usize, const L: usize>(
     big_k.copy_from_slice(&sk[32..64]);
     tr.copy_from_slice(&sk[64..128]);
 
-    let eta = params.eta;
+    let eta = params.eta.value();
     let eta_bits = bitlen(2 * eta);
     let s_chunk = 32 * eta_bits;
     let mut off = 128;
     let mut s1 = PolyVec::<u32, L>::zero();
     let mut s2 = PolyVec::<u32, K>::zero();
     for i in 0..L {
-        s1.v[i] = bit_unpack(&sk[off..off + s_chunk], eta, eta_bits);
+        let src = sk
+            .get(off..off + s_chunk)
+            .ok_or(EncodeError::BufferTooSmall)?;
+        s1.v[i] = bit_unpack(src, eta, eta_bits)?;
         off += s_chunk;
     }
     for i in 0..K {
-        s2.v[i] = bit_unpack(&sk[off..off + s_chunk], eta, eta_bits);
+        let src = sk
+            .get(off..off + s_chunk)
+            .ok_or(EncodeError::BufferTooSmall)?;
+        s2.v[i] = bit_unpack(src, eta, eta_bits)?;
         off += s_chunk;
     }
     let t0_a = (1u32 << (D - 1)) - 1;
@@ -312,10 +346,13 @@ pub fn sk_decode<const K: usize, const L: usize>(
     let t0_chunk = 32 * t0_bits;
     let mut t0 = PolyVec::<u32, K>::zero();
     for i in 0..K {
-        t0.v[i] = bit_unpack(&sk[off..off + t0_chunk], t0_b, t0_bits);
+        let src = sk
+            .get(off..off + t0_chunk)
+            .ok_or(EncodeError::BufferTooSmall)?;
+        t0.v[i] = bit_unpack(src, t0_b, t0_bits)?;
         off += t0_chunk;
     }
-    Some((rho, big_k, tr, s1, s2, t0))
+    Ok((rho, big_k, tr, s1, s2, t0))
 }
 
 #[cfg(test)]
@@ -342,22 +379,23 @@ mod tests {
             p.coeffs[j] = (j as u32) & max;
         }
         let mut buf = [0u8; 32 * W1_BITS];
-        simple_bit_pack(&p, W1_BITS, &mut buf);
-        let q = simple_bit_unpack(&buf, W1_BITS);
+        simple_bit_pack(&p, W1_BITS, &mut buf).unwrap();
+        let q = simple_bit_unpack(&buf, W1_BITS).unwrap();
         assert_eq!(q, p);
     }
 
     #[test]
     fn bit_pack_unpack_eta() {
-        let c_bits = bitlen(2 * ETA);
+        let eta = ETA.value();
+        let c_bits = bitlen(2 * eta);
         let mut p = Poly::<u32>::zero();
         for j in 0..N {
-            let s = (j as i32 % (2 * ETA as i32 + 1)) - ETA as i32;
+            let s = (j as i32 % (2 * eta as i32 + 1)) - eta as i32;
             p.coeffs[j] = from_signed(s, Q);
         }
         let mut buf = vec![0u8; 32 * c_bits];
-        bit_pack(&p, ETA, c_bits, &mut buf);
-        let q = bit_unpack(&buf, ETA, c_bits);
+        bit_pack(&p, eta, c_bits, &mut buf).unwrap();
+        let q = bit_unpack(&buf, eta, c_bits).unwrap();
         assert_eq!(q, p);
     }
 
@@ -378,8 +416,8 @@ mod tests {
             p.coeffs[j] = from_signed(s, Q);
         }
         let mut buf = vec![0u8; 32 * c_bits];
-        bit_pack(&p, b, c_bits, &mut buf);
-        let q = bit_unpack(&buf, b, c_bits);
+        bit_pack(&p, b, c_bits, &mut buf).unwrap();
+        let q = bit_unpack(&buf, b, c_bits).unwrap();
         assert_eq!(q, p);
     }
 
@@ -395,7 +433,7 @@ mod tests {
         pk_encode(&rho, &t1, &mut pk).unwrap();
         assert_eq!(&pk[..32], &rho);
         for i in 0..KK {
-            assert_eq!(pk_t1_row(&pk, i), t1.v[i]);
+            assert_eq!(pk_t1_row(&pk, i).unwrap(), t1.v[i]);
         }
     }
 
@@ -406,15 +444,16 @@ mod tests {
         let mut s1 = PolyVec::<u32, LL>::zero();
         let mut s2 = PolyVec::<u32, KK>::zero();
         let mut t0 = PolyVec::<u32, KK>::zero();
+        let eta = p.eta.value() as i32;
         for i in 0..LL {
             for j in 0..N {
-                let s = ((i + j) as i32 % (2 * p.eta as i32 + 1)) - p.eta as i32;
+                let s = ((i + j) as i32 % (2 * eta + 1)) - eta;
                 s1.v[i].coeffs[j] = from_signed(s, Q);
             }
         }
         for i in 0..KK {
             for j in 0..N {
-                let s = ((i + j + 5) as i32 % (2 * p.eta as i32 + 1)) - p.eta as i32;
+                let s = ((i + j + 5) as i32 % (2 * eta + 1)) - eta;
                 s2.v[i].coeffs[j] = from_signed(s, Q);
                 let t = (((j as i32) % (1 << D)) - (1 << (D - 1))) + 1;
                 let t = t.clamp(-(1 << (D - 1)) + 1, 1 << (D - 1));

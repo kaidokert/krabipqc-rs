@@ -6,9 +6,10 @@
 
 use fixed_bigint::Nct;
 
+use crate::encoding::EncodeError;
 use crate::field_ext::FieldExt;
 use crate::hashing::{Shake128Stream, Shake256Stream};
-use crate::params::{N, Q, Q_N_PRIME, Q_R2_MOD_Q, from_signed};
+use crate::params::{Eta, N, Q, Q_N_PRIME, Q_R2_MOD_Q, from_signed};
 use crate::poly::Poly;
 use crate::polyvec::{PolyMatrix, PolyVec};
 
@@ -19,23 +20,22 @@ type DPoly = Poly<u32>;
 /// [`ct_coeff_from_half_byte`] instead and only falls through here on
 /// the `< 2^-30` tail event.
 #[inline]
-fn coeff_from_half_byte(b: u8, eta: u32) -> Option<i32> {
+fn coeff_from_half_byte(b: u8, eta: Eta) -> Option<i32> {
     match eta {
-        2 => {
+        Eta::Eta2 => {
             if b < 15 {
                 Some(2 - (b as i32 % 5))
             } else {
                 None
             }
         }
-        4 => {
+        Eta::Eta4 => {
             if b < 9 {
                 Some(4 - b as i32)
             } else {
                 None
             }
         }
-        _ => panic!("unsupported eta"),
     }
 }
 
@@ -113,7 +113,7 @@ pub fn sample_in_ball(rho: &[u8], tau: usize) -> DPoly {
 /// nibble branchlessly with a mask. Budget is sized so the tail
 /// probability of falling through to [`rej_bounded_poly_fallback`] is
 /// `< 2^-30` for `eta = 4` (the worst case).
-pub fn rej_bounded_poly(rho_prime: &[u8; 64], r: u16, eta: u32) -> DPoly {
+pub fn rej_bounded_poly(rho_prime: &[u8; 64], r: u16, eta: Eta) -> DPoly {
     // Block = 136 bytes = 272 candidate nibbles; 4 blocks → 1088
     // candidates. With N = 256 the probability of < 256 accepts sits
     // ~30σ above target for eta=2 and ~22σ for eta=4.
@@ -148,7 +148,7 @@ pub fn rej_bounded_poly(rho_prime: &[u8; 64], r: u16, eta: u32) -> DPoly {
 /// astronomical tail event.
 #[cold]
 #[inline(never)]
-fn rej_bounded_poly_fallback(stream: &mut Shake256Stream, out: &mut DPoly, start: usize, eta: u32) {
+fn rej_bounded_poly_fallback(stream: &mut Shake256Stream, out: &mut DPoly, start: usize, eta: Eta) {
     let mut j = start;
     let mut block = [0u8; Shake256Stream::RATE];
     let mut block_pos = block.len();
@@ -179,10 +179,10 @@ fn rej_bounded_poly_fallback(stream: &mut Shake256Stream, out: &mut DPoly, start
 /// lookup tables let the load be data-independent on no-cache cores —
 /// cortex-m3 reads from `.rodata`.
 #[inline]
-fn ct_coeff_from_half_byte(b: u8, eta: u32) -> (u32, u32) {
+fn ct_coeff_from_half_byte(b: u8, eta: Eta) -> (u32, u32) {
     const Q_VAL: u32 = Q;
     match eta {
-        2 => {
+        Eta::Eta2 => {
             // accept iff b in 0..=14; entry at index 15 is don't-care
             // (suppressed by accept = 0).
             const TBL: [u32; 16] = [
@@ -206,7 +206,7 @@ fn ct_coeff_from_half_byte(b: u8, eta: u32) -> (u32, u32) {
             let accept = (b < 15) as u32;
             (accept, TBL[b as usize])
         }
-        4 => {
+        Eta::Eta4 => {
             // accept iff b in 0..=8.
             const TBL: [u32; 16] = [
                 4,
@@ -229,7 +229,6 @@ fn ct_coeff_from_half_byte(b: u8, eta: u32) -> (u32, u32) {
             let accept = (b < 9) as u32;
             (accept, TBL[b as usize])
         }
-        _ => panic!("unsupported eta"),
     }
 }
 
@@ -265,7 +264,7 @@ pub fn expand_a<const K: usize, const L: usize>(rho: &[u8; 32]) -> PolyMatrix<u3
 /// (length `K`) with coefficients in `[-eta, eta]`.
 pub fn expand_s<const K: usize, const L: usize>(
     rho_prime: &[u8; 64],
-    eta: u32,
+    eta: Eta,
 ) -> (PolyVec<u32, L>, PolyVec<u32, K>) {
     let mut s1 = PolyVec::<u32, L>::zero();
     let mut s2 = PolyVec::<u32, K>::zero();
@@ -299,7 +298,10 @@ pub fn expand_mask<const L: usize>(
         let n_bytes = mu_r.to_le_bytes();
         let mut stream = Shake256Stream::new(&[rho_pp, &n_bytes]);
         stream.squeeze(buf);
-        out.v[r] = bit_unpack_signed(buf, gamma1, c_bits);
+        // The local `buf` is sized exactly to `bytes_per_poly`, so
+        // bit_unpack_signed always succeeds; treat any error as a
+        // crate-internal invariant violation.
+        out.v[r] = bit_unpack_signed(buf, gamma1, c_bits).expect("buf sized to c_bits");
     }
     out
 }
@@ -308,16 +310,16 @@ pub fn expand_mask<const L: usize>(
 /// `[b - 2^c + 1, b]`; outputs canonical Z_q reps. The `a` argument of
 /// the FIPS API is implicit (`a = 2^c - 1 - b`) since verify only
 /// decodes ranges with that shape.
-pub fn bit_unpack_signed(bytes: &[u8], b: u32, c_bits: usize) -> DPoly {
+pub fn bit_unpack_signed(bytes: &[u8], b: u32, c_bits: usize) -> Result<DPoly, EncodeError> {
     let mut out = DPoly::zero();
-    debug_assert!(bytes.len() * 8 >= N * c_bits);
     let mask = (1u32 << c_bits) - 1;
     let mut acc: u64 = 0;
     let mut bits_in_acc: u32 = 0;
     let mut byte_idx = 0usize;
     for j in 0..N {
         while bits_in_acc < c_bits as u32 {
-            acc |= (bytes[byte_idx] as u64) << bits_in_acc;
+            let byte = *bytes.get(byte_idx).ok_or(EncodeError::BufferTooSmall)?;
+            acc |= (byte as u64) << bits_in_acc;
             byte_idx += 1;
             bits_in_acc += 8;
         }
@@ -327,7 +329,7 @@ pub fn bit_unpack_signed(bytes: &[u8], b: u32, c_bits: usize) -> DPoly {
         let signed = (b as i64) - (zp as i64);
         out.coeffs[j] = from_signed(signed as i32, Q);
     }
-    out
+    Ok(out)
 }
 
 #[cfg(test)]
@@ -347,14 +349,14 @@ mod tests {
 
     #[test]
     fn coeff_from_half_byte_eta2() {
-        assert_eq!(coeff_from_half_byte(0, 2), Some(2));
-        assert_eq!(coeff_from_half_byte(1, 2), Some(1));
-        assert_eq!(coeff_from_half_byte(2, 2), Some(0));
-        assert_eq!(coeff_from_half_byte(3, 2), Some(-1));
-        assert_eq!(coeff_from_half_byte(4, 2), Some(-2));
-        assert_eq!(coeff_from_half_byte(5, 2), Some(2));
-        assert_eq!(coeff_from_half_byte(14, 2), Some(-2));
-        assert_eq!(coeff_from_half_byte(15, 2), None);
+        assert_eq!(coeff_from_half_byte(0, Eta::Eta2), Some(2));
+        assert_eq!(coeff_from_half_byte(1, Eta::Eta2), Some(1));
+        assert_eq!(coeff_from_half_byte(2, Eta::Eta2), Some(0));
+        assert_eq!(coeff_from_half_byte(3, Eta::Eta2), Some(-1));
+        assert_eq!(coeff_from_half_byte(4, Eta::Eta2), Some(-2));
+        assert_eq!(coeff_from_half_byte(5, Eta::Eta2), Some(2));
+        assert_eq!(coeff_from_half_byte(14, Eta::Eta2), Some(-2));
+        assert_eq!(coeff_from_half_byte(15, Eta::Eta2), None);
     }
 
     #[test]
@@ -370,9 +372,10 @@ mod tests {
     fn rej_bounded_poly_smoke_eta2() {
         let rho_prime = [1u8; 64];
         let p = rej_bounded_poly(&rho_prime, 0, ETA);
+        let bound = ETA.value();
         for &c in &p.coeffs {
             let s = to_signed(c, Q);
-            assert!(s.unsigned_abs() <= ETA, "out of bounds: {}", s);
+            assert!(s.unsigned_abs() <= bound, "out of bounds: {}", s);
         }
     }
 
@@ -408,10 +411,11 @@ mod tests {
     fn expand_s_smoke() {
         let rho_prime = [2u8; 64];
         let (s1, s2) = expand_s::<K, L>(&rho_prime, ETA);
+        let bound = ETA.value();
         for p in s1.v.iter().chain(s2.v.iter()) {
             for &c in &p.coeffs {
                 let s = to_signed(c, Q);
-                assert!(s.unsigned_abs() <= ETA);
+                assert!(s.unsigned_abs() <= bound);
             }
         }
     }
