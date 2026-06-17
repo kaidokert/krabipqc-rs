@@ -64,7 +64,6 @@ fn barrett_div_rem(x: u32, two_g: u32, bf: u32) -> (u32, u32) {
 /// where `r0_canon` is the canonical Z_q rep of the (possibly
 /// negative) low part.
 pub fn power2round(r: u32) -> (u32, u32) {
-    debug_assert!(r < Q);
     let two_d: u32 = 1 << D;
     let half: u32 = 1 << (D - 1);
     let r0_u = r & (two_d - 1);

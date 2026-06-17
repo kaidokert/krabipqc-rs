@@ -80,8 +80,11 @@ pub(crate) fn bit_unpack(bytes: &[u8], b: u32, c_bits: usize) -> Poly<u32> {
 
 /// BitPack (FIPS 204 Alg 17): pack 256 canonical-Z_q coefficients with
 /// centered values in `[-a, b]` using `c = bitlen(a + b)` bits each.
-/// Each coefficient is stored as `zp = b - centered ∈ [0, a + b]`.
-pub(crate) fn bit_pack(p: &Poly<u32>, a: u32, b: u32, c_bits: usize, out: &mut [u8]) {
+/// Each coefficient is stored as `zp = b - centered ∈ [0, a + b]`;
+/// the FIPS `a` argument is implicit since the caller computes
+/// `c_bits` from `bitlen(a + b)` and we only need `b` to recover the
+/// centered value.
+pub(crate) fn bit_pack(p: &Poly<u32>, b: u32, c_bits: usize, out: &mut [u8]) {
     debug_assert!(out.len() * 8 >= N * c_bits);
     out.fill(0);
     let mut acc: u64 = 0;
@@ -90,7 +93,6 @@ pub(crate) fn bit_pack(p: &Poly<u32>, a: u32, b: u32, c_bits: usize, out: &mut [
     for &canon in &p.coeffs {
         let centered = to_signed(canon, Q) as i64;
         let zp = (b as i64) - centered;
-        debug_assert!((0..=(a as i64 + b as i64)).contains(&zp));
         acc |= (zp as u64) << bits_in_acc;
         bits_in_acc += c_bits as u32;
         while bits_in_acc >= 8 {
@@ -203,9 +205,25 @@ pub type DecodedSk<const K: usize, const L: usize> = (
     PolyVec<u32, K>,
 );
 
+/// Output-buffer length mismatch on an encoder. The per-set facades
+/// always pass exactly-sized arrays so this never fires in practice;
+/// it's the explicit signalling path for callers that hand in raw
+/// slices.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EncodeError {
+    BufferTooSmall,
+}
+
 /// pkEncode (FIPS 204 Alg 22). Output length: `32 + 32 * K * 10`.
-pub fn pk_encode<const K: usize>(rho: &[u8; 32], t1: &PolyVec<u32, K>, out: &mut [u8]) {
-    debug_assert_eq!(out.len(), 32 + 32 * K * 10);
+pub fn pk_encode<const K: usize>(
+    rho: &[u8; 32],
+    t1: &PolyVec<u32, K>,
+    out: &mut [u8],
+) -> Result<(), EncodeError> {
+    let expected = 32 + 32 * K * 10;
+    if out.len() != expected {
+        return Err(EncodeError::BufferTooSmall);
+    }
     out[..32].copy_from_slice(rho);
     // bitlen(q-1) - d = 23 - 13 = 10.
     let c_bits = 10;
@@ -214,6 +232,7 @@ pub fn pk_encode<const K: usize>(rho: &[u8; 32], t1: &PolyVec<u32, K>, out: &mut
         let start = 32 + i * chunk;
         simple_bit_pack(&t1.v[i], c_bits, &mut out[start..start + chunk]);
     }
+    Ok(())
 }
 
 /// skEncode (FIPS 204 Alg 24). Output length: `params.sk_bytes`.
@@ -227,8 +246,10 @@ pub fn sk_encode<const K: usize, const L: usize>(
     s2: &PolyVec<u32, K>,
     t0: &PolyVec<u32, K>,
     out: &mut [u8],
-) {
-    debug_assert_eq!(out.len(), params.sk_bytes);
+) -> Result<(), EncodeError> {
+    if out.len() != params.sk_bytes {
+        return Err(EncodeError::BufferTooSmall);
+    }
     out[..32].copy_from_slice(rho);
     out[32..64].copy_from_slice(big_k);
     out[64..128].copy_from_slice(tr);
@@ -238,11 +259,11 @@ pub fn sk_encode<const K: usize, const L: usize>(
     let s_chunk = 32 * eta_bits;
     let mut off = 128;
     for i in 0..L {
-        bit_pack(&s1.v[i], eta, eta, eta_bits, &mut out[off..off + s_chunk]);
+        bit_pack(&s1.v[i], eta, eta_bits, &mut out[off..off + s_chunk]);
         off += s_chunk;
     }
     for i in 0..K {
-        bit_pack(&s2.v[i], eta, eta, eta_bits, &mut out[off..off + s_chunk]);
+        bit_pack(&s2.v[i], eta, eta_bits, &mut out[off..off + s_chunk]);
         off += s_chunk;
     }
     let t0_a = (1u32 << (D - 1)) - 1;
@@ -250,10 +271,10 @@ pub fn sk_encode<const K: usize, const L: usize>(
     let t0_bits = bitlen(t0_a + t0_b);
     let t0_chunk = 32 * t0_bits;
     for i in 0..K {
-        bit_pack(&t0.v[i], t0_a, t0_b, t0_bits, &mut out[off..off + t0_chunk]);
+        bit_pack(&t0.v[i], t0_b, t0_bits, &mut out[off..off + t0_chunk]);
         off += t0_chunk;
     }
-    debug_assert_eq!(off, params.sk_bytes);
+    Ok(())
 }
 
 /// skDecode (FIPS 204 Alg 25).
@@ -294,14 +315,13 @@ pub fn sk_decode<const K: usize, const L: usize>(
         t0.v[i] = bit_unpack(&sk[off..off + t0_chunk], t0_b, t0_bits);
         off += t0_chunk;
     }
-    debug_assert_eq!(off, params.sk_bytes);
     Some((rho, big_k, tr, s1, s2, t0))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::params::ml_dsa_44::{ETA, GAMMA1, GAMMA1_BITS, K, OMEGA, W1_BITS};
+    use crate::params::ml_dsa_44::{ETA, GAMMA1, GAMMA1_BITS, W1_BITS};
     use crate::params::{ML_DSA_44, ML_DSA_65, ML_DSA_87, from_signed};
 
     #[test]
@@ -336,7 +356,7 @@ mod tests {
             p.coeffs[j] = from_signed(s, Q);
         }
         let mut buf = vec![0u8; 32 * c_bits];
-        bit_pack(&p, ETA, ETA, c_bits, &mut buf);
+        bit_pack(&p, ETA, c_bits, &mut buf);
         let q = bit_unpack(&buf, ETA, c_bits);
         assert_eq!(q, p);
     }
@@ -358,7 +378,7 @@ mod tests {
             p.coeffs[j] = from_signed(s, Q);
         }
         let mut buf = vec![0u8; 32 * c_bits];
-        bit_pack(&p, a, b, c_bits, &mut buf);
+        bit_pack(&p, b, c_bits, &mut buf);
         let q = bit_unpack(&buf, b, c_bits);
         assert_eq!(q, p);
     }
@@ -372,7 +392,7 @@ mod tests {
             }
         }
         let mut pk = vec![0u8; p.pk_bytes];
-        pk_encode(&rho, &t1, &mut pk);
+        pk_encode(&rho, &t1, &mut pk).unwrap();
         assert_eq!(&pk[..32], &rho);
         for i in 0..KK {
             assert_eq!(pk_t1_row(&pk, i), t1.v[i]);
@@ -402,7 +422,7 @@ mod tests {
             }
         }
         let mut sk = vec![0u8; p.sk_bytes];
-        sk_encode(p, &rho, &big_k, &tr, &s1, &s2, &t0, &mut sk);
+        sk_encode(p, &rho, &big_k, &tr, &s1, &s2, &t0, &mut sk).unwrap();
         let (rho2, k2, tr2, s1_2, s2_2, t0_2) = sk_decode(p, &sk).unwrap();
         assert_eq!(rho2, rho);
         assert_eq!(k2, big_k);

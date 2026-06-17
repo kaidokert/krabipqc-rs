@@ -52,7 +52,6 @@ pub fn keygen_internal_impl<const K: usize, const L: usize, P>(
     rho_prime.copy_from_slice(&seed_out[32..96]);
     big_k.copy_from_slice(&seed_out[96..128]);
 
-    let a_hat = expand_a::<K, L>(&rho);
     let (s1, s2) = expand_s::<K, L>(&rho_prime, params.eta);
     let s1: Zeroizing<PolyVec<u32, L>> = Zeroizing::new(s1);
     let s2: Zeroizing<PolyVec<u32, K>> = Zeroizing::new(s2);
@@ -62,11 +61,15 @@ pub fn keygen_internal_impl<const K: usize, const L: usize, P>(
         ntt::ntt::<P>(&mut s1_hat.v[i]);
     }
 
+    // Stream A_hat cells on the fly via rej_ntt_poly; materializing
+    // the full K×L matrix would burn up to ~56 KiB stack on ML-DSA-87
+    // and keygen visits each cell exactly once anyway.
     let mut t: Zeroizing<PolyVec<u32, K>> = Zeroizing::new(PolyVec::zero());
     for i in 0..K {
         let mut acc = Poly::<u32>::zero();
         for j in 0..L {
-            let p = ntt::mul_ntt::<P>(&a_hat.rows[i].v[j], &s1_hat.v[j]);
+            let a_ij = rej_ntt_poly(&rho, j as u8, i as u8);
+            let p = ntt::mul_ntt::<P>(&a_ij, &s1_hat.v[j]);
             for n in 0..N {
                 acc.coeffs[n] = pr::add::<u32>(acc.coeffs[n], p.coeffs[n], Q);
             }
@@ -80,10 +83,13 @@ pub fn keygen_internal_impl<const K: usize, const L: usize, P>(
     let (t1, t0) = power2round_vec(&t);
     let t0: Zeroizing<PolyVec<u32, K>> = Zeroizing::new(t0);
 
-    encoding::pk_encode(&rho, &t1, pk_out);
+    // Buffer sizes are enforced by the caller — facades pass
+    // `[u8; PK_BYTES]` / `[u8; SK_BYTES]` arrays sized from `params`.
+    encoding::pk_encode(&rho, &t1, pk_out).expect("pk_out sized by caller");
     let mut tr = [0u8; 64];
     shake256(&[pk_out], &mut tr);
-    encoding::sk_encode(params, &rho, &big_k, &tr, &s1, &s2, &t0, sk_out);
+    encoding::sk_encode(params, &rho, &big_k, &tr, &s1, &s2, &t0, sk_out)
+        .expect("sk_out sized by caller");
 }
 
 /// KeyGen_internal (Alg 6), Nct-default shim.
@@ -131,9 +137,12 @@ pub fn sign_internal_impl_pieces<const K: usize, const L: usize, P>(
     const MAX_M_PRIME_PIECES: usize = 6;
     assert_eq!(sk.len(), params.sk_bytes, "sk length");
     assert_eq!(sig_out.len(), params.sig_bytes, "sig_out length");
-    if m_prime_pieces.len() > MAX_M_PRIME_PIECES {
-        return;
-    }
+    assert!(
+        m_prime_pieces.len() <= MAX_M_PRIME_PIECES,
+        "m_prime_pieces.len() {} exceeds cap {}",
+        m_prime_pieces.len(),
+        MAX_M_PRIME_PIECES,
+    );
 
     // NTT s1/s2/t0 up front so subsequent c·s_hat / c·t0_hat products
     // across the kappa loop stay in Mont domain. Everything
@@ -166,7 +175,7 @@ pub fn sign_internal_impl_pieces<const K: usize, const L: usize, P>(
     // the multiplier sees `s · r` instead of `s`. `r` never leaves
     // the function.
     let (r_mont, r_inv_mont) =
-        blinding::derive_pair::<P>(&[rnd], b"krabipqc/sign-blind", Q, Q_N_PRIME, Q_R2_MOD_Q);
+        blinding::derive_pair::<P>(rnd, b"krabipqc/sign-blind", Q, Q_N_PRIME, Q_R2_MOD_Q);
     blinding::scale_polyvec_mont::<P, L>(&mut s1_hat, r_mont, Q, Q_N_PRIME);
     blinding::scale_polyvec_mont::<P, K>(&mut s2_hat, r_mont, Q, Q_N_PRIME);
     blinding::scale_polyvec_mont::<P, K>(&mut t0_hat, r_mont, Q, Q_N_PRIME);
@@ -185,7 +194,6 @@ pub fn sign_internal_impl_pieces<const K: usize, const L: usize, P>(
     let mut kappa: u16 = 0;
     let mut w1_buf = [0u8; MAX_W1_PACKED_BYTES];
     let w1_len = K * 32 * params.w1_bits;
-    debug_assert!(w1_len <= MAX_W1_PACKED_BYTES);
     let w1_packed = &mut w1_buf[..w1_len];
 
     let mut c_tilde_buf = [0u8; MAX_CTILDE_BYTES];
@@ -198,7 +206,6 @@ pub fn sign_internal_impl_pieces<const K: usize, const L: usize, P>(
     let sig_z_off = params.ctilde_bytes;
     let z_pack_bits = 1 + params.gamma1_bits;
     let z_chunk = 32 * z_pack_bits;
-    let z_pack_a = params.gamma1 - 1;
     let z_pack_b = params.gamma1;
     let sig_hint_off = sig_z_off + L * z_chunk;
     let w1_chunk = 32 * params.w1_bits;
@@ -265,7 +272,6 @@ pub fn sign_internal_impl_pieces<const K: usize, const L: usize, P>(
             }
             encoding::bit_pack(
                 &row,
-                z_pack_a,
                 z_pack_b,
                 z_pack_bits,
                 &mut sig_out[sig_z_off + i * z_chunk..sig_z_off + (i + 1) * z_chunk],

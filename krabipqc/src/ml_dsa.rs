@@ -282,8 +282,8 @@ macro_rules! per_set {
             pub fn keygen<R: rand_core::TryCryptoRng + ?Sized>(
                 rng: &mut R,
             ) -> Result<([u8; PK_BYTES], [u8; SK_BYTES]), R::Error> {
-                let mut xi = [0u8; 32];
-                rng.try_fill_bytes(&mut xi)?;
+                let mut xi = zeroize::Zeroizing::new([0u8; 32]);
+                rng.try_fill_bytes(&mut *xi)?;
                 Ok(keygen_internal(&xi))
             }
 

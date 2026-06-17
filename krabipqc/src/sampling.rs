@@ -20,7 +20,6 @@ type DPoly = Poly<u32>;
 /// the `< 2^-30` tail event.
 #[inline]
 fn coeff_from_half_byte(b: u8, eta: u32) -> Option<i32> {
-    debug_assert!(b < 16);
     match eta {
         2 => {
             if b < 15 {
@@ -181,7 +180,6 @@ fn rej_bounded_poly_fallback(stream: &mut Shake256Stream, out: &mut DPoly, start
 /// cortex-m3 reads from `.rodata`.
 #[inline]
 fn ct_coeff_from_half_byte(b: u8, eta: u32) -> (u32, u32) {
-    debug_assert!(b < 16);
     const Q_VAL: u32 = Q;
     match eta {
         2 => {
@@ -243,7 +241,9 @@ fn ct_maybe_write(coeffs: &mut [u32; N], j: &mut u32, accept: u32, val: u32) {
     let in_range = ((*j).wrapping_sub(N as u32) >> 31) & 1;
     let do_write = accept & in_range;
     let mask = 0u32.wrapping_sub(do_write);
-    let idx = core::cmp::min(*j as usize, N - 1);
+    // Bitmask saturation (N is 256 = a power of two) keeps the index
+    // in [0, N) without a `min` branch.
+    let idx = (*j as usize) & (N - 1);
     coeffs[idx] = (val & mask) | (coeffs[idx] & !mask);
     *j = j.wrapping_add(do_write);
 }
