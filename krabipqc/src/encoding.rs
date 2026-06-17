@@ -79,7 +79,7 @@ pub fn sig_z_row<const K: usize, const L: usize>(
 }
 
 /// Subslice of `sig` covering the encoded hint, suitable for
-/// [`h_bit`] / [`h_weight`] / [`validate_hint_bytes`].
+/// [`h_row_positions`] / [`h_weight`] / [`validate_hint_bytes`].
 pub fn sig_hint_slice<'a, const K: usize, const L: usize>(
     params: &Params<K, L>,
     sig: &'a [u8],
@@ -89,22 +89,22 @@ pub fn sig_hint_slice<'a, const K: usize, const L: usize>(
     &sig[off..off + params.omega + K]
 }
 
-/// `j`-th coefficient (0 or 1) of the `i`-th hint polynomial, read
-/// from the encoded form. Caller must have run [`validate_hint_bytes`]
-/// first — out-of-range positions or non-monotone counts will panic
-/// or return garbage here.
-pub fn h_bit<const K: usize>(hint: &[u8], omega: usize, i: usize, j: usize) -> u32 {
+/// Iterator over the set positions of the `i`-th hint polynomial.
+/// Positions are strictly increasing (guaranteed by the prior
+/// [`validate_hint_bytes`] check), so a single pass through the verify
+/// loop can apply hints in `O(omega_row)` instead of `O(omega · N)`.
+pub fn h_row_positions<const K: usize>(
+    hint: &[u8],
+    omega: usize,
+    i: usize,
+) -> impl Iterator<Item = usize> + '_ {
     let start = if i == 0 {
         0
     } else {
         hint[omega + i - 1] as usize
     };
     let end = hint[omega + i] as usize;
-    if hint[start..end].iter().any(|&pos| pos as usize == j) {
-        1
-    } else {
-        0
-    }
+    hint[start..end].iter().map(|&pos| pos as usize)
 }
 
 /// Total hint weight, read from the cumulative-count tail of the
@@ -114,8 +114,8 @@ pub fn h_weight<const K: usize>(hint: &[u8], omega: usize) -> u32 {
 }
 
 /// FIPS 204 `HintBitUnpack` validity check, without decoding. Returns
-/// `false` on any malformed input; subsequent [`h_bit`] / [`h_weight`]
-/// calls rely on this having passed.
+/// `false` on any malformed input; subsequent [`h_row_positions`] /
+/// [`h_weight`] calls rely on this having passed.
 pub fn validate_hint_bytes<const K: usize>(hint: &[u8], omega: usize) -> bool {
     if hint.len() != omega + K {
         return false;

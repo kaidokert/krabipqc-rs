@@ -110,6 +110,7 @@ where
     // (~4 KiB) of scratch.
     let mut w1_buf = [0u8; MAX_W1_PACKED_BYTES];
     let w1_len = K * 32 * params.w1_bits;
+    debug_assert!(w1_len <= MAX_W1_PACKED_BYTES);
     let w1_packed = &mut w1_buf[..w1_len];
     let w1_chunk = 32 * params.w1_bits;
 
@@ -133,9 +134,19 @@ where
 
         ntt::inv_ntt::<P>(&mut row);
 
+        // Walk the row's hint positions once; positions are strictly
+        // increasing per validate_hint_bytes, so a peeking pointer
+        // tracks h(k) without rescanning the slice for each k.
+        let mut hint_iter = encoding::h_row_positions::<K>(hint, params.omega, i).peekable();
         for k in 0..N {
-            let h_bit = encoding::h_bit::<K>(hint, params.omega, i, k);
-            row.coeffs[k] = crate::rounding::use_hint(h_bit, row.coeffs[k], params.gamma2);
+            let h = match hint_iter.peek() {
+                Some(&pos) if pos == k => {
+                    hint_iter.next();
+                    1
+                }
+                _ => 0,
+            };
+            row.coeffs[k] = crate::rounding::use_hint(h, row.coeffs[k], params.gamma2);
         }
 
         encoding::simple_bit_pack(
