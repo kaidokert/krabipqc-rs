@@ -1,6 +1,8 @@
-//! Sampling primitives used by ML-DSA verify (FIPS 204 §7.3):
-//! [`rej_ntt_poly`] for `A_hat`, [`sample_in_ball`] for the challenge
-//! polynomial, [`bit_unpack_signed`] for decoding the signature's `z`.
+//! Sampling primitives for ML-DSA (FIPS 204 §7.3).
+//!
+//! Secret-derived samplers ([`rej_bounded_poly`] and the helpers it
+//! drives) take a fixed-budget CT lookup path so the per-byte
+//! rejection timing doesn't leak `rho_prime`.
 
 use fixed_bigint::Nct;
 
@@ -8,8 +10,34 @@ use crate::field_ext::FieldExt;
 use crate::hashing::{Shake128Stream, Shake256Stream};
 use crate::params::{N, Q, Q_N_PRIME, Q_R2_MOD_Q, from_signed};
 use crate::poly::Poly;
+use crate::polyvec::{PolyMatrix, PolyVec};
 
 type DPoly = Poly<u32>;
+
+/// CoeffFromHalfByte (FIPS 204 Alg 15). Variable-time; the CT-amplified
+/// primary path of [`rej_bounded_poly`] uses
+/// [`ct_coeff_from_half_byte`] instead and only falls through here on
+/// the `< 2^-30` tail event.
+#[inline]
+fn coeff_from_half_byte(b: u8, eta: u32) -> Option<i32> {
+    match eta {
+        2 => {
+            if b < 15 {
+                Some(2 - (b as i32 % 5))
+            } else {
+                None
+            }
+        }
+        4 => {
+            if b < 9 {
+                Some(4 - b as i32)
+            } else {
+                None
+            }
+        }
+        _ => panic!("unsupported eta"),
+    }
+}
 
 /// CoeffFromThreeBytes (FIPS 204 Alg 14).
 #[inline]
@@ -76,6 +104,206 @@ pub fn sample_in_ball(rho: &[u8], tau: usize) -> DPoly {
     c
 }
 
+/// RejBoundedPoly (FIPS 204 Alg 31): poly with coefficients in
+/// `[-eta, eta]`.
+///
+/// `rho_prime` is secret-derived, so the per-byte rejection timing of
+/// the spec's variable-time loop leaks. This version squeezes a
+/// fixed budget of SHAKE-256 blocks up front and walks every candidate
+/// nibble branchlessly with a mask. Budget is sized so the tail
+/// probability of falling through to [`rej_bounded_poly_fallback`] is
+/// `< 2^-30` for `eta = 4` (the worst case).
+pub fn rej_bounded_poly(rho_prime: &[u8; 64], r: u16, eta: u32) -> DPoly {
+    // Block = 136 bytes = 272 candidate nibbles; 4 blocks → 1088
+    // candidates. With N = 256 the probability of < 256 accepts sits
+    // ~30σ above target for eta=2 and ~22σ for eta=4.
+    const K_BLOCKS: usize = 4;
+    const BUF_LEN: usize = K_BLOCKS * Shake256Stream::RATE;
+
+    let mut out = DPoly::zero();
+    let r_bytes = r.to_le_bytes();
+    let mut stream = Shake256Stream::new(&[rho_prime, &r_bytes]);
+
+    let mut buf = [0u8; BUF_LEN];
+    stream.squeeze(&mut buf);
+
+    let mut j: u32 = 0;
+    for &b in buf.iter() {
+        let (accept_lo, val_lo) = ct_coeff_from_half_byte(b & 0x0F, eta);
+        ct_maybe_write(&mut out.coeffs, &mut j, accept_lo, val_lo);
+        let (accept_hi, val_hi) = ct_coeff_from_half_byte(b >> 4, eta);
+        ct_maybe_write(&mut out.coeffs, &mut j, accept_hi, val_hi);
+    }
+
+    if (j as usize) < N {
+        rej_bounded_poly_fallback(&mut stream, &mut out, j as usize, eta);
+    }
+
+    out
+}
+
+/// Variable-time tail used when the fixed budget of
+/// [`rej_bounded_poly`] doesn't yield `N` accepts. Probability of
+/// reaching this path is `< 2^-30`; kept for robustness against the
+/// astronomical tail event.
+#[cold]
+#[inline(never)]
+fn rej_bounded_poly_fallback(stream: &mut Shake256Stream, out: &mut DPoly, start: usize, eta: u32) {
+    let mut j = start;
+    let mut block = [0u8; Shake256Stream::RATE];
+    let mut block_pos = block.len();
+    while j < N {
+        if block_pos >= block.len() {
+            stream.squeeze(&mut block);
+            block_pos = 0;
+        }
+        let b = block[block_pos];
+        block_pos += 1;
+        if let Some(z) = coeff_from_half_byte(b & 0x0F, eta) {
+            out.coeffs[j] = from_signed(z, Q);
+            j += 1;
+            if j == N {
+                break;
+            }
+        }
+        if let Some(z) = coeff_from_half_byte(b >> 4, eta) {
+            out.coeffs[j] = from_signed(z, Q);
+            j += 1;
+        }
+    }
+}
+
+/// CT analogue of [`coeff_from_half_byte`]: returns `(accept, value)`
+/// with `accept ∈ {0, 1}` and `value` the canonical Z_q
+/// representation (meaningful only when `accept == 1`). The 16-entry
+/// lookup tables let the load be data-independent on no-cache cores —
+/// cortex-m3 reads from `.rodata`.
+#[inline]
+fn ct_coeff_from_half_byte(b: u8, eta: u32) -> (u32, u32) {
+    const Q_VAL: u32 = Q;
+    match eta {
+        2 => {
+            // accept iff b in 0..=14; entry at index 15 is don't-care
+            // (suppressed by accept = 0).
+            const TBL: [u32; 16] = [
+                2,
+                1,
+                0,
+                Q_VAL - 1,
+                Q_VAL - 2,
+                2,
+                1,
+                0,
+                Q_VAL - 1,
+                Q_VAL - 2,
+                2,
+                1,
+                0,
+                Q_VAL - 1,
+                Q_VAL - 2,
+                0,
+            ];
+            let accept = (b < 15) as u32;
+            (accept, TBL[b as usize])
+        }
+        4 => {
+            // accept iff b in 0..=8.
+            const TBL: [u32; 16] = [
+                4,
+                3,
+                2,
+                1,
+                0,
+                Q_VAL - 1,
+                Q_VAL - 2,
+                Q_VAL - 3,
+                Q_VAL - 4,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+            ];
+            let accept = (b < 9) as u32;
+            (accept, TBL[b as usize])
+        }
+        _ => panic!("unsupported eta"),
+    }
+}
+
+/// Branchless conditional store: write `val` into `coeffs[*j]` and
+/// bump `*j` iff `accept == 1` and `*j < N`. The saturating index keeps
+/// the array access in-bounds once `N` accepts have landed.
+#[inline]
+fn ct_maybe_write(coeffs: &mut [u32; N], j: &mut u32, accept: u32, val: u32) {
+    let in_range = ((*j).wrapping_sub(N as u32) >> 31) & 1;
+    let do_write = accept & in_range;
+    let mask = 0u32.wrapping_sub(do_write);
+    // Bitmask saturation (N is 256 = a power of two) keeps the index
+    // in [0, N) without a `min` branch.
+    let idx = (*j as usize) & (N - 1);
+    coeffs[idx] = (val & mask) | (coeffs[idx] & !mask);
+    *j = j.wrapping_add(do_write);
+}
+
+/// ExpandA (FIPS 204 Alg 32): build the `K x L` matrix `A_hat` in NTT
+/// domain from `rho`. Used by keygen; verify and sign stream
+/// individual columns via [`rej_ntt_poly`] instead.
+pub fn expand_a<const K: usize, const L: usize>(rho: &[u8; 32]) -> PolyMatrix<u32, K, L> {
+    let mut m = PolyMatrix::<u32, K, L>::zero();
+    for r in 0..K {
+        for s in 0..L {
+            m.rows[r].v[s] = rej_ntt_poly(rho, s as u8, r as u8);
+        }
+    }
+    m
+}
+
+/// ExpandS (FIPS 204 Alg 33): sample `s1` (length `L`) and `s2`
+/// (length `K`) with coefficients in `[-eta, eta]`.
+pub fn expand_s<const K: usize, const L: usize>(
+    rho_prime: &[u8; 64],
+    eta: u32,
+) -> (PolyVec<u32, L>, PolyVec<u32, K>) {
+    let mut s1 = PolyVec::<u32, L>::zero();
+    let mut s2 = PolyVec::<u32, K>::zero();
+    for r in 0..L {
+        s1.v[r] = rej_bounded_poly(rho_prime, r as u16, eta);
+    }
+    for r in 0..K {
+        s2.v[r] = rej_bounded_poly(rho_prime, (r + L) as u16, eta);
+    }
+    (s1, s2)
+}
+
+/// ExpandMask (FIPS 204 Alg 34): sample `y` with coefficients in
+/// `(-gamma1, gamma1]`. `mu` is the running kappa counter from
+/// `sign_internal`; row `r`'s seed is `SHAKE256(rho_pp || (mu+r) as 2 bytes)`.
+pub fn expand_mask<const L: usize>(
+    rho_pp: &[u8; 64],
+    mu: u16,
+    gamma1: u32,
+    gamma1_bits: usize,
+) -> PolyVec<u32, L> {
+    let mut out = PolyVec::<u32, L>::zero();
+    // c = 1 + bitlen(gamma1 - 1); for gamma1 = 2^17, c = 18.
+    let c_bits = 1 + gamma1_bits;
+    let bytes_per_poly = N * c_bits / 8;
+    // gamma1 = 2^19 → 640 bytes per poly; 1024 covers it with slack.
+    let mut buf = [0u8; 32 * 32];
+    let buf = &mut buf[..bytes_per_poly];
+    for r in 0..L {
+        let mu_r = mu.wrapping_add(r as u16);
+        let n_bytes = mu_r.to_le_bytes();
+        let mut stream = Shake256Stream::new(&[rho_pp, &n_bytes]);
+        stream.squeeze(buf);
+        out.v[r] = bit_unpack_signed(buf, gamma1, c_bits);
+    }
+    out
+}
+
 /// BitUnpack (FIPS 204 Alg 18) for the signed range
 /// `[b - 2^c + 1, b]`; outputs canonical Z_q reps. The `a` argument of
 /// the FIPS API is implicit (`a = 2^c - 1 - b`) since verify only
@@ -105,7 +333,7 @@ pub fn bit_unpack_signed(bytes: &[u8], b: u32, c_bits: usize) -> DPoly {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::params::ml_dsa_44::TAU;
+    use crate::params::ml_dsa_44::{ETA, GAMMA1, GAMMA1_BITS, K, L, TAU};
     use crate::params::to_signed;
 
     #[test]
@@ -118,11 +346,33 @@ mod tests {
     }
 
     #[test]
+    fn coeff_from_half_byte_eta2() {
+        assert_eq!(coeff_from_half_byte(0, 2), Some(2));
+        assert_eq!(coeff_from_half_byte(1, 2), Some(1));
+        assert_eq!(coeff_from_half_byte(2, 2), Some(0));
+        assert_eq!(coeff_from_half_byte(3, 2), Some(-1));
+        assert_eq!(coeff_from_half_byte(4, 2), Some(-2));
+        assert_eq!(coeff_from_half_byte(5, 2), Some(2));
+        assert_eq!(coeff_from_half_byte(14, 2), Some(-2));
+        assert_eq!(coeff_from_half_byte(15, 2), None);
+    }
+
+    #[test]
     fn rej_ntt_poly_smoke() {
         let rho = [0u8; 32];
         let p = rej_ntt_poly(&rho, 0, 0);
         for &c in &p.coeffs {
             assert!(c < Q);
+        }
+    }
+
+    #[test]
+    fn rej_bounded_poly_smoke_eta2() {
+        let rho_prime = [1u8; 64];
+        let p = rej_bounded_poly(&rho_prime, 0, ETA);
+        for &c in &p.coeffs {
+            let s = to_signed(c, Q);
+            assert!(s.unsigned_abs() <= ETA, "out of bounds: {}", s);
         }
     }
 
@@ -139,5 +389,42 @@ mod tests {
             }
         }
         assert_eq!(nonzero, TAU);
+    }
+
+    #[test]
+    fn expand_a_smoke() {
+        let rho = [0u8; 32];
+        let a = expand_a::<K, L>(&rho);
+        for row in &a.rows {
+            for poly in &row.v {
+                for &c in &poly.coeffs {
+                    assert!(c < Q);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn expand_s_smoke() {
+        let rho_prime = [2u8; 64];
+        let (s1, s2) = expand_s::<K, L>(&rho_prime, ETA);
+        for p in s1.v.iter().chain(s2.v.iter()) {
+            for &c in &p.coeffs {
+                let s = to_signed(c, Q);
+                assert!(s.unsigned_abs() <= ETA);
+            }
+        }
+    }
+
+    #[test]
+    fn expand_mask_bounded() {
+        let rho_pp = [3u8; 64];
+        let y = expand_mask::<L>(&rho_pp, 0, GAMMA1, GAMMA1_BITS);
+        for p in &y.v {
+            for &c in &p.coeffs {
+                let s = to_signed(c, Q);
+                assert!(s.unsigned_abs() <= GAMMA1);
+            }
+        }
     }
 }

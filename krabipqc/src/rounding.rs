@@ -1,6 +1,8 @@
-//! Rounding helpers used by ML-DSA verify (FIPS 204 §8): [`decompose`]
-//! for the `r1` recovery from `A·z − c·t1·2^d`, and [`use_hint`] for
-//! folding the signature hint into the recovered `w1`.
+//! Rounding helpers (FIPS 204 §8): `Power2Round` for keygen's
+//! `(t1, t0)` split, `Decompose` / `HighBits` / `LowBits` for the
+//! `w1 = HighBits(A·y)` step in sign and the `r1` recovery in verify,
+//! `MakeHint` / `UseHint` for the per-coefficient hint that lets
+//! verify reproduce `w1` from `(z, h)`.
 //!
 //! Per-coefficient timing is independent of the input: the sign
 //! selects are branchless mask blends, and `% (2*gamma2)` /
@@ -10,7 +12,8 @@
 
 use modmath::basic::pre_reduced as pr;
 
-use crate::params::Q;
+use crate::params::{D, N, Q};
+use crate::polyvec::PolyVec;
 
 // Only two `gamma2` values appear across ML-DSA-44/65/87, so the
 // Barrett factor and the UseHint divisor are precomputed for each.
@@ -56,6 +59,41 @@ fn barrett_div_rem(x: u32, two_g: u32, bf: u32) -> (u32, u32) {
     (q, r)
 }
 
+/// Power2Round (FIPS 204 Alg 35): splits `r ∈ [0, Q)` as
+/// `r = r1 · 2^d + r0` with `r0` centered. Returns `(r1, r0_canon)`
+/// where `r0_canon` is the canonical Z_q rep of the (possibly
+/// negative) low part.
+pub fn power2round(r: u32) -> (u32, u32) {
+    let two_d: u32 = 1 << D;
+    let half: u32 = 1 << (D - 1);
+    let r0_u = r & (two_d - 1);
+
+    let gt_half = (half.wrapping_sub(r0_u) >> 31) & 1;
+    let mask = 0u32.wrapping_sub(gt_half);
+
+    let neg_r0 = Q.wrapping_sub(two_d.wrapping_sub(r0_u));
+    let r0_canon = (r0_u & !mask) | (neg_r0 & mask);
+
+    let r1 = (r.wrapping_sub(r0_u).wrapping_add(two_d & mask)) >> D;
+
+    (r1, r0_canon)
+}
+
+/// Coefficient-wise [`power2round`] over a `PolyVec`. `t1` lands in
+/// `[0, 2^{bitlen(q-1) - d})` and `t0` in canonical Z_q.
+pub fn power2round_vec<const K: usize>(t: &PolyVec<u32, K>) -> (PolyVec<u32, K>, PolyVec<u32, K>) {
+    let mut t1 = PolyVec::<u32, K>::zero();
+    let mut t0 = PolyVec::<u32, K>::zero();
+    for i in 0..K {
+        for j in 0..N {
+            let (a, b) = power2round(t.v[i].coeffs[j]);
+            t1.v[i].coeffs[j] = a;
+            t0.v[i].coeffs[j] = b;
+        }
+    }
+    (t1, t0)
+}
+
 /// Decompose (FIPS 204 Alg 36). Returns `(r1, r0)` with `r1` in
 /// `[0, (q-1)/(2*gamma2))` and `r0` the canonical Z_q rep of the
 /// centered low part.
@@ -88,6 +126,27 @@ pub fn decompose(r: u32, gamma2: u32) -> (u32, u32) {
     let r0_canon = (r0_canon0 & !wrap_mask) | (r0_minus1 & wrap_mask);
 
     (r1, r0_canon)
+}
+
+/// HighBits (FIPS 204 Alg 37): the `r1` half of [`decompose`].
+#[inline]
+pub fn high_bits(r: u32, gamma2: u32) -> u32 {
+    decompose(r, gamma2).0
+}
+
+/// LowBits (FIPS 204 Alg 38): the `r0` half of [`decompose`].
+#[inline]
+pub fn low_bits(r: u32, gamma2: u32) -> u32 {
+    decompose(r, gamma2).1
+}
+
+/// MakeHint (FIPS 204 Alg 39): returns 1 iff
+/// `HighBits(r + z) != HighBits(r)`. `z` and `r` are canonical Z_q reps.
+pub fn make_hint(z: u32, r: u32, gamma2: u32) -> u8 {
+    let r1 = high_bits(r, gamma2);
+    let v1 = high_bits(pr::add::<u32>(r, z, Q), gamma2);
+    let diff = r1 ^ v1;
+    (((diff | diff.wrapping_neg()) >> 31) & 1) as u8
 }
 
 /// UseHint (FIPS 204 Alg 40). The `% m` spec ops collapse to a single
@@ -181,6 +240,80 @@ mod tests {
             (r1 + 1) % m
         } else {
             (r1 + m - 1) % m
+        }
+    }
+
+    fn ref_power2round(r: u32) -> (u32, u32) {
+        let r_plus = r % Q;
+        let two_d: u32 = 1 << D;
+        let half: u32 = 1 << (D - 1);
+        let r0_u = r_plus & (two_d - 1);
+        let (r0c, r1) = if r0_u > half {
+            (
+                pr::sub::<u32>(0, two_d - r0_u, Q),
+                (r_plus - r0_u + two_d) >> D,
+            )
+        } else {
+            (r0_u, (r_plus - r0_u) >> D)
+        };
+        (r1, r0c)
+    }
+
+    fn ref_make_hint(z: u32, r: u32, gamma2: u32) -> u8 {
+        let r1 = ref_decompose(r, gamma2).0;
+        let v1 = ref_decompose(pr::add::<u32>(r, z, Q), gamma2).0;
+        if r1 != v1 { 1 } else { 0 }
+    }
+
+    #[test]
+    fn power2round_recombines() {
+        let two_d: u32 = 1 << D;
+        for &r in &[0u32, 1, 8191, 8192, 9000, Q / 2, Q - 1] {
+            let (r1, r0) = power2round(r);
+            let r0_signed = crate::params::to_signed(r0, Q);
+            let r1_2d = pr::mul::<u32>(r1, two_d, Q);
+            let recomb = pr::add::<u32>(r1_2d, crate::params::from_signed(r0_signed, Q), Q);
+            assert_eq!(recomb, r);
+            assert!(r0_signed > -(1 << (D - 1)));
+            assert!(r0_signed <= 1 << (D - 1));
+        }
+    }
+
+    #[test]
+    fn power2round_matches_reference_dense() {
+        for r in (0..Q).step_by(509) {
+            assert_eq!(power2round(r), ref_power2round(r), "r={}", r);
+        }
+    }
+
+    #[test]
+    fn make_hint_matches_reference() {
+        let g = (Q - 1) / 88;
+        for r in (0..Q).step_by(2003) {
+            for &z in &[0u32, 1, Q - 1, g, Q - g] {
+                assert_eq!(make_hint(z, r, g), ref_make_hint(z, r, g));
+            }
+        }
+    }
+
+    #[test]
+    fn make_use_hint_roundtrip() {
+        let g = GAMMA2;
+        let mut rng_state: u64 = 0xfeedfacecafebeef;
+        let mut rng = || {
+            rng_state = rng_state
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407);
+            (rng_state as u32) % Q
+        };
+        for _ in 0..200 {
+            let r = rng();
+            let z_signed = ((rng() as i64 % (g as i64)) - (g as i64 / 2)) as i32;
+            let z = crate::params::from_signed(z_signed, Q);
+            let h = make_hint(z, r, g);
+            let recovered = use_hint(h as u32, r, g);
+            let expected = high_bits(pr::add::<u32>(r, z, Q), g);
+            assert_eq!(recovered, expected, "z={}, r={}, h={}", z_signed, r, h);
         }
     }
 
