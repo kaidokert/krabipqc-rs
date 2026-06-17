@@ -1,24 +1,42 @@
 #![cfg_attr(not(test), no_std)]
 #![forbid(unsafe_code)]
 
-//! `no_std` math foundation for post-quantum cryptography.
+//! `no_std` ML-DSA verifier (FIPS 204, all three parameter sets).
 //!
-//! This crate is the substrate for the NIST PQC standards published in
-//! FIPS 203 (ML-KEM) and FIPS 204 (ML-DSA).
+//! Parameter sets: [`ml_dsa_44`], [`ml_dsa_65`], [`ml_dsa_87`].
+//! Byte-for-byte ACVP-conformant on the `sigVer` test vectors.
 //!
-//! # Layer responsibilities
+//! # Quick start
 //!
-//! Modular arithmetic and Montgomery-domain operations are owned by
-//! `modmath`; we re-export its [`Field`] / [`Residue`] typestate so
-//! consumers can name them through `krabipqc::*`. The [`Personality`]
-//! marker (`Nct` variable-time vs `Ct` constant-time via `subtle`) is
-//! owned by `fixed_bigint`; we re-export the marker types as well so
-//! the entire surface name-resolves under `krabipqc`.
+//! ```ignore
+//! use krabipqc::ml_dsa_44;
+//!
+//! assert!(ml_dsa_44::verify(&pk, b"hello mldsa", b"app-ctx", &sig));
+//! ```
+//!
+//! [`ml_dsa_44::verify_internal`] takes the FIPS 204 §5.2 message
+//! representative `M'` directly, for callers that build `M'` outside
+//! the crate (e.g. TLS 1.3 pre-hashed signatures).
+//!
+//! Each per-set facade exposes a `verify_ct` sibling that routes
+//! NTT-domain Mont arithmetic through `wide_montgomery_mul_ct` and
+//! uses [`subtle::ConditionallySelectable`] for conditional
+//! subtractions, producing byte-identical accept/reject decisions to
+//! the default `verify`.
 
+pub(crate) mod encoding;
+pub(crate) mod field_ext;
 pub mod hashing;
+pub(crate) mod internal;
+mod ml_dsa;
+pub(crate) mod ntt;
 pub mod params;
 pub mod poly;
 pub mod polyvec;
+pub(crate) mod rounding;
+pub(crate) mod sampling;
+
+pub use ml_dsa::{ml_dsa_44, ml_dsa_65, ml_dsa_87};
 
 pub use fixed_bigint::{Ct, Nct, Personality};
 pub use modmath::{Field, FieldCt, FieldNct, MontStorage, Residue, ResidueCt, ResidueNct};

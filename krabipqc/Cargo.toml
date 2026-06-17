@@ -25,3 +25,8 @@ subtle = { version = "2.6", default-features = false }
 
 # `Zeroize` impls on `Poly<M>` / `PolyVec<M, LEN>`.
 zeroize = { version = "1", default-features = false }
+
+[dev-dependencies]
+hex = { version = "0.4", default-features = false, features = ["alloc"] }
+serde_json = { version = "1", default-features = false, features = ["alloc"] }
+serde = { version = "1", default-features = false, features = ["derive", "alloc"] }
