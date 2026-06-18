@@ -20,7 +20,6 @@
 //! mismatched const-generic pinning would surface loudly in debug
 //! rather than corrupt silently.
 
-use core::convert::Infallible;
 use core::fmt;
 
 use kem::common::array::{Array, sizes};
@@ -29,7 +28,7 @@ use kem::{
     Decapsulate, Decapsulator, Encapsulate, Generate, Kem, KeyExport, KeyInit, KeySizeUser,
     TryKeyInit,
 };
-use rand_core::{CryptoRng, TryCryptoRng, TryRng};
+use rand_core::{CryptoRng, TryCryptoRng};
 use zeroize::Zeroizing;
 
 // ============================================================================
@@ -42,7 +41,7 @@ macro_rules! impl_mlkem_kem {
     (
         $kem_marker:ident, $dk_struct:ident, $ek_struct:ident,
         $ek_size:ident, $dk_size:ident, $ct_size:ident,
-        $facade:ident,
+        $facade:ident, $k:literal,
     ) => {
         /// Marker type for ML-KEM-N's `kem::Kem` impl. Sk / ek / ct sizes
         /// live in the associated types.
@@ -90,14 +89,14 @@ macro_rules! impl_mlkem_kem {
             type KeySize = sizes::$ek_size;
         }
 
-        impl KeyInit for $ek_struct {
-            fn new(key: &Array<u8, sizes::$ek_size>) -> Self {
-                Self { ek: key.clone() }
-            }
-        }
-
+        // No infallible `KeyInit` for the public-side ek: peer-supplied
+        // bytes have to pass the FIPS 203 §7.2 modulus check, so the
+        // only construction path from a `Key` is fallible.
         impl TryKeyInit for $ek_struct {
             fn new(key: &Array<u8, sizes::$ek_size>) -> Result<Self, kem::InvalidKey> {
+                let ek_pke = &key[..384 * $k];
+                crate::mlkem::encoding::ek_modulus_check::<$k>(ek_pke)
+                    .map_err(|_| kem::InvalidKey)?;
                 Ok(Self { ek: key.clone() })
             }
         }
@@ -179,44 +178,31 @@ macro_rules! impl_mlkem_kem {
                 R: CryptoRng + ?Sized,
             {
                 let ek_arr: &[u8; crate::$facade::EK_BYTES] = (&self.ek).into();
-                // Same shape as Decapsulate: route around the facade's
-                // KemError so the trait's infallible signature holds.
+                // ek was validated at TryKeyInit boundary, m and the
+                // output buffers are pinned, so encaps_internal has no
+                // reachable failure mode here.
                 let mut m = Zeroizing::new([0u8; 32]);
                 rand_core::Rng::fill_bytes(rng, &mut *m);
                 let (ss_bytes, ct_bytes) = crate::$facade::encaps_internal(ek_arr, &m)
-                    .expect("encaps_internal infallible on facade-pinned buffer sizes");
+                    .expect("encaps_internal infallible: ek validated, buffers pinned");
                 (Array::from(ct_bytes), Array::from(ss_bytes))
             }
         }
     };
 }
 
-// Thin newtype to adapt `&mut R: CryptoRng + ?Sized` to a
-// `TryCryptoRng` for code paths that need the latter. Unused at the
-// moment, kept for future fallible-trait additions.
-#[allow(dead_code)]
-struct InfallibleRng<'r, R: CryptoRng + ?Sized>(&'r mut R);
-
-impl<R: CryptoRng + ?Sized> TryRng for InfallibleRng<'_, R> {
-    type Error = Infallible;
-
-    fn try_next_u32(&mut self) -> Result<u32, Self::Error> {
-        Ok(rand_core::Rng::next_u32(self.0))
-    }
-    fn try_next_u64(&mut self) -> Result<u64, Self::Error> {
-        Ok(rand_core::Rng::next_u64(self.0))
-    }
-    fn try_fill_bytes(&mut self, dst: &mut [u8]) -> Result<(), Self::Error> {
-        rand_core::Rng::fill_bytes(self.0, dst);
-        Ok(())
-    }
-}
-
-impl<R: CryptoRng + ?Sized> TryCryptoRng for InfallibleRng<'_, R> {}
-
-impl_mlkem_kem!(MlKem512, Dk512, Ek512, U800, U1632, U768, ml_kem_512,);
-impl_mlkem_kem!(MlKem768, Dk768, Ek768, U1184, U2400, U1088, ml_kem_768,);
-impl_mlkem_kem!(MlKem1024, Dk1024, Ek1024, U1568, U3168, U1568, ml_kem_1024,);
+impl_mlkem_kem!(MlKem512, Dk512, Ek512, U800, U1632, U768, ml_kem_512, 2,);
+impl_mlkem_kem!(MlKem768, Dk768, Ek768, U1184, U2400, U1088, ml_kem_768, 3,);
+impl_mlkem_kem!(
+    MlKem1024,
+    Dk1024,
+    Ek1024,
+    U1568,
+    U3168,
+    U1568,
+    ml_kem_1024,
+    4,
+);
 
 // ============================================================================
 // ML-DSA
@@ -415,9 +401,12 @@ impl_mldsa_sig!(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use core::convert::Infallible;
 
-    /// Deterministic fixed RNG so tests stay reproducible. The crypto
-    /// itself isn't.
+    /// Deterministic fixed RNG so tests stay reproducible. Implements
+    /// `TryCryptoRng<Error = Infallible>`, which rand_core's blanket
+    /// impls lift to `CryptoRng` for the trait methods bounded on the
+    /// infallible variant.
     struct FixedRng(u8);
     impl rand_core::TryRng for FixedRng {
         type Error = Infallible;
@@ -434,26 +423,6 @@ mod tests {
     }
     impl rand_core::TryCryptoRng for FixedRng {}
 
-    /// `CryptoRng`-bounded sibling for the trait methods that take
-    /// `CryptoRng` (not `TryCryptoRng`). The blanket impls in
-    /// rand_core lift any `TryCryptoRng<Error = Infallible>` to
-    /// `CryptoRng`.
-    struct InfallibleFixedRng(u8);
-    impl rand_core::TryRng for InfallibleFixedRng {
-        type Error = Infallible;
-        fn try_next_u32(&mut self) -> Result<u32, Self::Error> {
-            Ok(u32::from_le_bytes([self.0; 4]))
-        }
-        fn try_next_u64(&mut self) -> Result<u64, Self::Error> {
-            Ok(u64::from_le_bytes([self.0; 8]))
-        }
-        fn try_fill_bytes(&mut self, dst: &mut [u8]) -> Result<(), Self::Error> {
-            dst.fill(self.0);
-            Ok(())
-        }
-    }
-    impl rand_core::TryCryptoRng for InfallibleFixedRng {}
-
     /// ML-KEM-512 round-trip via the Kem trait family.
     #[test]
     fn mlkem512_roundtrip_via_traits() {
@@ -461,7 +430,7 @@ mod tests {
         let dk = Dk512::try_generate_from_rng(&mut rng).unwrap();
         let ek = dk.encapsulation_key().clone();
 
-        let mut crng = InfallibleFixedRng(0x77);
+        let mut crng = FixedRng(0x77);
         let (ct, ss_send) = ek.encapsulate_with_rng(&mut crng);
         let ss_recv = dk.decapsulate(&ct);
         assert_eq!(ss_send, ss_recv);
@@ -491,9 +460,23 @@ mod tests {
         let signer = MlDsa65Signer::try_generate_from_rng(&mut rng).unwrap();
         let verifier = signer.verifying_key();
 
-        let mut crng = InfallibleFixedRng(0x55);
+        let mut crng = FixedRng(0x55);
         let msg = b"randomized";
         let sig: MlDsa65Signature = signer.sign_with_rng(&mut crng, msg);
         verifier.verify(msg, &sig).expect("verify should pass");
+    }
+
+    /// Non-canonical ek (first t_hat coefficient forged to 0xFFF > q)
+    /// must be rejected at TryKeyInit so the infallible Encapsulate
+    /// trait can't be reached with an invalid key.
+    #[test]
+    fn mlkem512_trykeyinit_rejects_non_canonical_ek() {
+        let mut rng = FixedRng(0x42);
+        let dk = Dk512::try_generate_from_rng(&mut rng).unwrap();
+        let mut bytes: Array<u8, sizes::U800> = dk.ek.ek;
+        // Pack the first 12-bit coefficient as 0xFFF (4095, > q = 3329).
+        bytes[0] = 0xFF;
+        bytes[1] = (bytes[1] & 0xF0) | 0x0F;
+        assert!(<Ek512 as TryKeyInit>::new(&bytes).is_err());
     }
 }
