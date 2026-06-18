@@ -138,6 +138,10 @@ where
     P: Personality + FieldExt<P>,
 {
     const MAX_M_PRIME_PIECES: usize = 6;
+    // BufferTooSmall multiplexes three shape contracts here: caller's
+    // sk / sig_out lengths must match params, and the M' absorb list
+    // must fit the fixed-size scratch array. Each is structurally
+    // guaranteed by the per-set facade — surfaced rather than panicked.
     if sk.len() != params.sk_bytes
         || sig_out.len() != params.sig_bytes
         || m_prime_pieces.len() > MAX_M_PRIME_PIECES

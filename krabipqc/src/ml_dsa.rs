@@ -360,9 +360,9 @@ macro_rules! per_set {
 
             /// Reshape a non-RNG `SignError<Infallible>` from `sign` /
             /// `hash_sign` into the `SignError<R::Error>` that the
-            /// RNG-driven entry points return. The `Rng` arm comes from
-            /// an uninhabited type, so the `unreachable!` is provably
-            /// dead code.
+            /// RNG-driven entry points return. The `Rng` arm wraps the
+            /// uninhabited `Infallible`, so the `match never {}` is
+            /// provably dead code.
             fn lift_sign_err<E>(e: SignError<Infallible>) -> SignError<E> {
                 match e {
                     SignError::CtxTooLong => SignError::CtxTooLong,
