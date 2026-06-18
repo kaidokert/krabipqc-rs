@@ -24,9 +24,39 @@ pub const N: usize = 256;
 #[cfg(test)]
 pub const ZETA: u32 = 17;
 
-/// Per-parameter-set constants. `K` is the module rank (length of the
-/// secret vector); for ML-KEM `L = K` (square A), so we only carry `K`
-/// in the const-generic position.
+/// CBD parameter η — FIPS 203 only defines η ∈ {2, 3}. Closed enum so
+/// `prf_eta`/`sample_poly_cbd` can size the SHAKE-256 squeeze buffer
+/// without runtime range checks or worst-case over-allocation.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Eta {
+    /// η = 2 — used by ML-KEM-768/1024 (eta1, eta2) and ML-KEM-512 (eta2).
+    Two,
+    /// η = 3 — used by ML-KEM-512 (eta1).
+    Three,
+}
+
+impl Eta {
+    /// Numeric value (2 or 3).
+    #[inline]
+    pub const fn value(self) -> u32 {
+        match self {
+            Eta::Two => 2,
+            Eta::Three => 3,
+        }
+    }
+
+    /// PRF output / CBD input length in bytes (64 · η).
+    #[inline]
+    pub const fn buf_len(self) -> usize {
+        64 * self.value() as usize
+    }
+}
+
+/// PRF output buffer size that fits both η values without
+/// over-allocating beyond what the larger one needs.
+pub const PRF_BUF_LEN: usize = 64 * 3;
+
+/// Per-parameter-set constants. `K` is the module rank.
 ///
 /// `#[non_exhaustive]` prevents external code from constructing custom
 /// (potentially invalid) parameter sets — only [`ML_KEM_512`],
@@ -34,8 +64,8 @@ pub const ZETA: u32 = 17;
 #[derive(Clone, Copy, Debug)]
 #[non_exhaustive]
 pub struct Params<const K: usize> {
-    pub eta1: u32,
-    pub eta2: u32,
+    pub eta1: Eta,
+    pub eta2: Eta,
     pub du: usize,
     pub dv: usize,
     pub ek_bytes: usize, // public key (encapsulation key)
@@ -60,8 +90,8 @@ const fn ct_bytes(k: usize, du: usize, dv: usize) -> usize {
 
 /// ML-KEM-512 (k=2, eta1=3, eta2=2, du=10, dv=4).
 pub const ML_KEM_512: Params<2> = Params {
-    eta1: 3,
-    eta2: 2,
+    eta1: Eta::Three,
+    eta2: Eta::Two,
     du: 10,
     dv: 4,
     ek_bytes: ek_bytes(2),
@@ -71,8 +101,8 @@ pub const ML_KEM_512: Params<2> = Params {
 
 /// ML-KEM-768 (k=3, eta1=2, eta2=2, du=10, dv=4).
 pub const ML_KEM_768: Params<3> = Params {
-    eta1: 2,
-    eta2: 2,
+    eta1: Eta::Two,
+    eta2: Eta::Two,
     du: 10,
     dv: 4,
     ek_bytes: ek_bytes(3),
@@ -82,8 +112,8 @@ pub const ML_KEM_768: Params<3> = Params {
 
 /// ML-KEM-1024 (k=4, eta1=2, eta2=2, du=11, dv=5).
 pub const ML_KEM_1024: Params<4> = Params {
-    eta1: 2,
-    eta2: 2,
+    eta1: Eta::Two,
+    eta2: Eta::Two,
     du: 11,
     dv: 5,
     ek_bytes: ek_bytes(4),

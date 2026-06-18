@@ -19,6 +19,7 @@ macro_rules! per_set {
         #[doc = $doc]
         pub mod $mod {
             use fixed_bigint::Ct;
+            use zeroize::Zeroizing;
 
             use crate::mlkem::kem;
             use crate::mlkem::params::{SS_BYTES, $params};
@@ -98,10 +99,10 @@ macro_rules! per_set {
             pub fn keygen<R: rand_core::TryCryptoRng + ?Sized>(
                 rng: &mut R,
             ) -> Result<([u8; EK_BYTES], [u8; DK_BYTES]), KemError<R::Error>> {
-                let mut d = [0u8; 32];
-                let mut z = [0u8; 32];
-                rng.try_fill_bytes(&mut d).map_err(KemError::Rng)?;
-                rng.try_fill_bytes(&mut z).map_err(KemError::Rng)?;
+                let mut d = Zeroizing::new([0u8; 32]);
+                let mut z = Zeroizing::new([0u8; 32]);
+                rng.try_fill_bytes(&mut *d).map_err(KemError::Rng)?;
+                rng.try_fill_bytes(&mut *z).map_err(KemError::Rng)?;
                 Ok(keygen_internal(&d, &z)?)
             }
 
@@ -109,10 +110,10 @@ macro_rules! per_set {
             pub fn keygen_ct<R: rand_core::TryCryptoRng + ?Sized>(
                 rng: &mut R,
             ) -> Result<([u8; EK_BYTES], [u8; DK_BYTES]), KemError<R::Error>> {
-                let mut d = [0u8; 32];
-                let mut z = [0u8; 32];
-                rng.try_fill_bytes(&mut d).map_err(KemError::Rng)?;
-                rng.try_fill_bytes(&mut z).map_err(KemError::Rng)?;
+                let mut d = Zeroizing::new([0u8; 32]);
+                let mut z = Zeroizing::new([0u8; 32]);
+                rng.try_fill_bytes(&mut *d).map_err(KemError::Rng)?;
+                rng.try_fill_bytes(&mut *z).map_err(KemError::Rng)?;
                 Ok(keygen_internal_ct(&d, &z)?)
             }
 
@@ -122,8 +123,8 @@ macro_rules! per_set {
                 ek: &[u8; EK_BYTES],
                 rng: &mut R,
             ) -> Result<([u8; SS_BYTES], [u8; CT_BYTES]), KemError<R::Error>> {
-                let mut m = [0u8; 32];
-                rng.try_fill_bytes(&mut m).map_err(KemError::Rng)?;
+                let mut m = Zeroizing::new([0u8; 32]);
+                rng.try_fill_bytes(&mut *m).map_err(KemError::Rng)?;
                 Ok(encaps_internal(ek, &m)?)
             }
 
@@ -132,8 +133,8 @@ macro_rules! per_set {
                 ek: &[u8; EK_BYTES],
                 rng: &mut R,
             ) -> Result<([u8; SS_BYTES], [u8; CT_BYTES]), KemError<R::Error>> {
-                let mut m = [0u8; 32];
-                rng.try_fill_bytes(&mut m).map_err(KemError::Rng)?;
+                let mut m = Zeroizing::new([0u8; 32]);
+                rng.try_fill_bytes(&mut *m).map_err(KemError::Rng)?;
                 Ok(encaps_internal_ct(ek, &m)?)
             }
         }

@@ -21,6 +21,10 @@ fn parse_quad(text: &str) -> ([u8; 32], [u8; 32], Vec<u8>, Vec<u8>) {
     let d = from_hex(lines.next().expect("d"));
     let ek = from_hex(lines.next().expect("ek"));
     let dk = from_hex(lines.next().expect("dk"));
+    assert!(
+        lines.next().is_none(),
+        "unexpected trailing lines in keygen KAT"
+    );
     assert_eq!(z.len(), 32);
     assert_eq!(d.len(), 32);
     let mut z_arr = [0u8; 32];

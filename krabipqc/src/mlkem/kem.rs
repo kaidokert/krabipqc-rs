@@ -10,6 +10,7 @@ use zeroize::Zeroizing;
 use crate::encoding::EncodeError;
 use crate::field_ext::FieldExt;
 use crate::hashing::{sha3_256, sha3_512, shake256};
+use crate::mlkem::encoding::ek_modulus_check;
 use crate::mlkem::params::{Params, SS_BYTES};
 use crate::mlkem::pke;
 
@@ -78,6 +79,12 @@ where
     if ek.len() != params.ek_bytes || ct_out.len() != params.ct_bytes {
         return Err(EncodeError::BufferTooSmall);
     }
+
+    // FIPS 203 §7.2 encapsulation-key modulus check on the t_hat
+    // portion of ek (first 384*K bytes). Rejects non-canonical
+    // encodings with coefficients ≥ q.
+    let t_hat_bytes = ek.get(..384 * K).ok_or(EncodeError::BufferTooSmall)?;
+    ek_modulus_check::<K>(t_hat_bytes)?;
 
     let h_ek = sha3_256(&[ek]);
     let g_out = sha3_512(&[m, &h_ek]);
@@ -294,6 +301,30 @@ mod tests {
     #[test]
     fn cross_personality_equiv_1024() {
         cross_personality_equiv(&ML_KEM_1024);
+    }
+
+    /// FIPS 203 §7.2: an ek whose decoded t_hat has any coefficient ≥ q
+    /// must be rejected by encaps. Forge one by setting the first
+    /// 12-bit coefficient to 0xFFF (4095, well above q = 3329).
+    #[test]
+    fn encaps_rejects_non_canonical_ek() {
+        let params = &ML_KEM_768;
+        let d = [4u8; 32];
+        let z = [5u8; 32];
+        let mut ek = vec![0u8; params.ek_bytes];
+        let mut dk = vec![0u8; params.dk_bytes];
+        keygen_internal(params, &d, &z, &mut ek, &mut dk).unwrap();
+
+        // First coefficient is `ek[0] | ((ek[1] & 0x0F) << 8)`; force to 0xFFF.
+        ek[0] = 0xFF;
+        ek[1] = (ek[1] & 0xF0) | 0x0F;
+
+        let mut ss = [0u8; SS_BYTES];
+        let mut ct = vec![0u8; params.ct_bytes];
+        assert_eq!(
+            encaps_internal(params, &ek, &[6u8; 32], &mut ss, &mut ct),
+            Err(EncodeError::NotCanonical)
+        );
     }
 
     #[test]

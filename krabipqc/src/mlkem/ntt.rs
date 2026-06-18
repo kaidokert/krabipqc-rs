@@ -217,7 +217,8 @@ pub fn inv_ntt<P: Personality + FieldExt<P>>(p: &mut Poly<u32>) {
 }
 
 /// BaseCaseMultiply (FIPS 203 Alg 12): one (a0, a1) × (b0, b1) in
-/// Z_q[X]/(X^2 − gamma). All inputs are Mont-form.
+/// Z_q[X]/(X^2 − gamma). All inputs are Mont-form. `c1` fuses the two
+/// cross multiplies into one wide accumulator + REDC.
 #[inline]
 fn base_case_mul<P: Personality + FieldExt<P>>(
     a0: u32,
@@ -229,7 +230,9 @@ fn base_case_mul<P: Personality + FieldExt<P>>(
     let a0b0 = mul_mont_p::<P>(a0, b0);
     let a1b1g = mul_mont_p::<P>(mul_mont_p::<P>(a1, b1), gamma_mont);
     let c0 = add_mont::<P>(a0b0, a1b1g);
-    let c1 = add_mont::<P>(mul_mont_p::<P>(a0, b1), mul_mont_p::<P>(a1, b0));
+    let (lo, hi) = <P as FieldExt<P>>::mul_acc(0, 0, a0, b1);
+    let (lo, hi) = <P as FieldExt<P>>::mul_acc(lo, hi, a1, b0);
+    let c1 = <P as FieldExt<P>>::redc(lo, hi, Q, Q_N_PRIME);
     (c0, c1)
 }
 
@@ -263,10 +266,7 @@ pub fn mul_ntt_acc<const K: usize, P: Personality + FieldExt<P>>(
 ) {
     for (i, &gamma_mont) in GAMMAS_MONT.iter().enumerate() {
         let (mut a0b0_lo, mut a0b0_hi) = (0u32, 0u32);
-        // a1·b1·γ collapses to Mont u32 per term (γ scale needs a REDC)
-        // and is accumulated separately so it doesn't get a stray R⁻¹
-        // from being summed into a pre-REDC wide accumulator.
-        let mut a1b1g_acc: u32 = 0;
+        let (mut a1b1_lo, mut a1b1_hi) = (0u32, 0u32);
         let (mut c1_lo, mut c1_hi) = (0u32, 0u32);
         for j in 0..K {
             let a0 = a_row[j].coeffs[2 * i];
@@ -274,13 +274,17 @@ pub fn mul_ntt_acc<const K: usize, P: Personality + FieldExt<P>>(
             let b0 = b_vec[j].coeffs[2 * i];
             let b1 = b_vec[j].coeffs[2 * i + 1];
             (a0b0_lo, a0b0_hi) = <P as FieldExt<P>>::mul_acc(a0b0_lo, a0b0_hi, a0, b0);
-            let a1b1g = mul_mont_p::<P>(mul_mont_p::<P>(a1, b1), gamma_mont);
-            a1b1g_acc = add_mont::<P>(a1b1g_acc, a1b1g);
+            (a1b1_lo, a1b1_hi) = <P as FieldExt<P>>::mul_acc(a1b1_lo, a1b1_hi, a1, b1);
             (c1_lo, c1_hi) = <P as FieldExt<P>>::mul_acc(c1_lo, c1_hi, a0, b1);
             (c1_lo, c1_hi) = <P as FieldExt<P>>::mul_acc(c1_lo, c1_hi, a1, b0);
         }
+        // γ is loop-invariant, so fold the Σ a1·b1 collapse and the γ
+        // scale into a single REDC + mul_mont after the j loop —
+        // O(1) instead of O(K) per output coefficient.
         let a0b0 = <P as FieldExt<P>>::redc(a0b0_lo, a0b0_hi, Q, Q_N_PRIME);
-        out.coeffs[2 * i] = add_mont::<P>(a0b0, a1b1g_acc);
+        let a1b1 = <P as FieldExt<P>>::redc(a1b1_lo, a1b1_hi, Q, Q_N_PRIME);
+        let a1b1g = mul_mont_p::<P>(a1b1, gamma_mont);
+        out.coeffs[2 * i] = add_mont::<P>(a0b0, a1b1g);
         out.coeffs[2 * i + 1] = <P as FieldExt<P>>::redc(c1_lo, c1_hi, Q, Q_N_PRIME);
     }
 }

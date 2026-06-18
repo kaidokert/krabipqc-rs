@@ -19,12 +19,15 @@ use crate::poly::Poly;
 use crate::polyvec::PolyVec;
 use crate::sampling::bit_unpack_signed;
 
-/// Out-of-range slice access while encoding or decoding. Used by all
-/// the bit-packers and the per-message codecs to surface malformed
-/// inputs instead of panicking.
+/// Out-of-range slice access while encoding or decoding, or a value
+/// outside its valid range surfaced by an input-validation check
+/// (e.g. FIPS 203 §7.2 encapsulation-key modulus check).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EncodeError {
     BufferTooSmall,
+    /// A decoded coefficient was not in canonical range (e.g. ≥ q for
+    /// a 12-bit-packed ML-KEM `t_hat`).
+    NotCanonical,
 }
 
 /// `ceil(log2(a+1))` — minimum unsigned bit count for representing `a`.

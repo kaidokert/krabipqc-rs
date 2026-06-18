@@ -35,6 +35,10 @@ fn parse_encaps(text: &str) -> (Vec<u8>, [u8; 32], Vec<u8>, Vec<u8>) {
     let m_v = from_hex(lines.next().expect("m"));
     let c_exp = from_hex(lines.next().expect("c"));
     let k_exp = from_hex(lines.next().expect("k"));
+    assert!(
+        lines.next().is_none(),
+        "unexpected trailing lines in encaps KAT"
+    );
     assert_eq!(m_v.len(), 32);
     let mut m = [0u8; 32];
     m.copy_from_slice(&m_v);
@@ -46,6 +50,10 @@ fn parse_decaps(text: &str) -> (Vec<u8>, Vec<u8>, Vec<u8>) {
     let dk = from_hex(lines.next().expect("dk"));
     let ct = from_hex(lines.next().expect("c"));
     let k_exp = from_hex(lines.next().expect("k"));
+    assert!(
+        lines.next().is_none(),
+        "unexpected trailing lines in decaps KAT"
+    );
     (dk, ct, k_exp)
 }
 

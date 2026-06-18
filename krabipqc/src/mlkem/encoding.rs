@@ -89,6 +89,27 @@ pub(crate) fn byte_decode(bytes: &[u8], d: usize) -> Result<Poly<u32>, EncodeErr
     Ok(out)
 }
 
+/// FIPS 203 §7.2 encapsulation-key modulus check. For each of the `K`
+/// 384-byte chunks of `ek_pke`, decode the 12-bit packed coefficients
+/// and reject if any value is ≥ q (i.e. the encoding is non-canonical).
+///
+/// Equivalent to `ByteEncode_12(ByteDecode_12(ek_pke)) == ek_pke`,
+/// since our `byte_decode` does not reduce mod q.
+pub(crate) fn ek_modulus_check<const K: usize>(ek_pke: &[u8]) -> Result<(), EncodeError> {
+    for j in 0..K {
+        let chunk = ek_pke
+            .get(j * 384..(j + 1) * 384)
+            .ok_or(EncodeError::BufferTooSmall)?;
+        let p = byte_decode(chunk, 12)?;
+        for &c in &p.coeffs {
+            if c >= Q {
+                return Err(EncodeError::NotCanonical);
+            }
+        }
+    }
+    Ok(())
+}
+
 /// ByteEncode for a PolyVec: pack each polynomial with `d` bits per coeff.
 pub(crate) fn byte_encode_vec<const LEN: usize>(
     v: &PolyVec<u32, LEN>,
