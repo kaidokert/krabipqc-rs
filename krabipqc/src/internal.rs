@@ -494,15 +494,15 @@ where
             row.coeffs[k] = crate::rounding::use_hint(h, row.coeffs[k], params.gamma2);
         }
 
-        // w1_packed is sized exactly to `K * w1_chunk` above, so this
-        // never fails; treat any error as a crate-internal invariant
-        // violation.
-        encoding::simple_bit_pack(
-            &row,
-            params.w1_bits,
-            &mut w1_packed[i * w1_chunk..(i + 1) * w1_chunk],
-        )
-        .expect("w1_packed sized for K rows");
+        // w1_packed is sized exactly to `K * w1_chunk` above; any
+        // failure here is a crate-internal invariant violation that
+        // surfaces as a verify-reject rather than a panic.
+        let Some(slot) = w1_packed.get_mut(i * w1_chunk..(i + 1) * w1_chunk) else {
+            return false;
+        };
+        if encoding::simple_bit_pack(&row, params.w1_bits, slot).is_err() {
+            return false;
+        }
     }
 
     let mut c_tilde_prime_buf = [0u8; MAX_CTILDE_BYTES];
