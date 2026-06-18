@@ -114,10 +114,11 @@ pub fn sign_internal_impl<const K: usize, const L: usize, P>(
     m_prime: &[u8],
     rnd: &[u8; 32],
     sig_out: &mut [u8],
-) where
+) -> Result<(), encoding::EncodeError>
+where
     P: Personality + FieldExt<P>,
 {
-    sign_internal_impl_pieces::<K, L, P>(params, sk, &[m_prime], rnd, sig_out);
+    sign_internal_impl_pieces::<K, L, P>(params, sk, &[m_prime], rnd, sig_out)
 }
 
 /// Same as [`sign_internal_impl`] but absorbs `M'` from a slice of
@@ -132,25 +133,23 @@ pub fn sign_internal_impl_pieces<const K: usize, const L: usize, P>(
     m_prime_pieces: &[&[u8]],
     rnd: &[u8; 32],
     sig_out: &mut [u8],
-) where
+) -> Result<(), encoding::EncodeError>
+where
     P: Personality + FieldExt<P>,
 {
     const MAX_M_PRIME_PIECES: usize = 6;
-    assert_eq!(sk.len(), params.sk_bytes, "sk length");
-    assert_eq!(sig_out.len(), params.sig_bytes, "sig_out length");
-    assert!(
-        m_prime_pieces.len() <= MAX_M_PRIME_PIECES,
-        "m_prime_pieces.len() {} exceeds cap {}",
-        m_prime_pieces.len(),
-        MAX_M_PRIME_PIECES,
-    );
+    if sk.len() != params.sk_bytes
+        || sig_out.len() != params.sig_bytes
+        || m_prime_pieces.len() > MAX_M_PRIME_PIECES
+    {
+        return Err(encoding::EncodeError::BufferTooSmall);
+    }
 
     // NTT s1/s2/t0 up front so subsequent c·s_hat / c·t0_hat products
     // across the kappa loop stay in Mont domain. Everything
     // secret-derived is zeroize-on-drop; `rho` is public.
     let (rho, big_k, tr, mut s1_hat, mut s2_hat, mut t0_hat) = {
-        let (rho, big_k, tr, mut s1, mut s2, mut t0) =
-            encoding::sk_decode(params, sk).expect("malformed sk");
+        let (rho, big_k, tr, mut s1, mut s2, mut t0) = encoding::sk_decode(params, sk)?;
         for i in 0..L {
             ntt::ntt::<P>(&mut s1.v[i]);
         }
@@ -217,7 +216,7 @@ pub fn sign_internal_impl_pieces<const K: usize, const L: usize, P>(
     let mut w_buf: Zeroizing<PolyVec<u32, K>> = Zeroizing::new(PolyVec::zero());
 
     loop {
-        *y = expand_mask::<L>(&rho_pp, kappa, params.gamma1, params.gamma1_bits);
+        *y = expand_mask::<L>(&rho_pp, kappa, params.gamma1, params.gamma1_bits)?;
 
         *tmp_l = *y;
         for i in 0..L {
@@ -243,12 +242,10 @@ pub fn sign_internal_impl_pieces<const K: usize, const L: usize, P>(
             for j in 0..N {
                 w1_row.coeffs[j] = high_bits(w_buf.v[i].coeffs[j], params.gamma2);
             }
-            encoding::simple_bit_pack(
-                &w1_row,
-                params.w1_bits,
-                &mut w1_packed[i * w1_chunk..(i + 1) * w1_chunk],
-            )
-            .expect("w1_packed sized for K rows");
+            let slot = w1_packed
+                .get_mut(i * w1_chunk..(i + 1) * w1_chunk)
+                .ok_or(encoding::EncodeError::BufferTooSmall)?;
+            encoding::simple_bit_pack(&w1_row, params.w1_bits, slot)?;
         }
         shake256(&[&*mu, w1_packed], c_tilde);
 
@@ -272,13 +269,10 @@ pub fn sign_internal_impl_pieces<const K: usize, const L: usize, P>(
                     z_norm = a;
                 }
             }
-            encoding::bit_pack(
-                &row,
-                z_pack_b,
-                z_pack_bits,
-                &mut sig_out[sig_z_off + i * z_chunk..sig_z_off + (i + 1) * z_chunk],
-            )
-            .expect("sig_out sized for L z rows");
+            let slot = sig_out
+                .get_mut(sig_z_off + i * z_chunk..sig_z_off + (i + 1) * z_chunk)
+                .ok_or(encoding::EncodeError::BufferTooSmall)?;
+            encoding::bit_pack(&row, z_pack_b, z_pack_bits, slot)?;
         }
 
         for i in 0..K {
@@ -305,7 +299,9 @@ pub fn sign_internal_impl_pieces<const K: usize, const L: usize, P>(
             continue;
         }
 
-        let hint_section = &mut sig_out[sig_hint_off..sig_hint_off + params.omega + K];
+        let hint_section = sig_out
+            .get_mut(sig_hint_off..sig_hint_off + params.omega + K)
+            .ok_or(encoding::EncodeError::BufferTooSmall)?;
         hint_section.fill(0);
         let mut idx = 0usize;
         let mut weight: u32 = 0;
@@ -345,8 +341,11 @@ pub fn sign_internal_impl_pieces<const K: usize, const L: usize, P>(
             continue;
         }
 
-        sig_out[..params.ctilde_bytes].copy_from_slice(c_tilde);
-        return;
+        let ctilde_slot = sig_out
+            .get_mut(..params.ctilde_bytes)
+            .ok_or(encoding::EncodeError::BufferTooSmall)?;
+        ctilde_slot.copy_from_slice(c_tilde);
+        return Ok(());
     }
 }
 
@@ -357,8 +356,8 @@ pub fn sign_internal<const K: usize, const L: usize>(
     m_prime: &[u8],
     rnd: &[u8; 32],
     sig_out: &mut [u8],
-) {
-    sign_internal_impl::<K, L, Nct>(params, sk, m_prime, rnd, sig_out);
+) -> Result<(), encoding::EncodeError> {
+    sign_internal_impl::<K, L, Nct>(params, sk, m_prime, rnd, sig_out)
 }
 
 /// Single-slice `M'` shim around [`verify_internal_impl_pieces`].
@@ -547,7 +546,7 @@ mod tests {
         keygen_internal(params, &xi, &mut pk, &mut sk).unwrap();
         let mp = message_prime(b"", b"hello mldsa");
         let mut sig = vec![0u8; params.sig_bytes];
-        sign_internal(params, &sk, &mp, &[0xC3u8; 32], &mut sig);
+        sign_internal(params, &sk, &mp, &[0xC3u8; 32], &mut sig).unwrap();
         assert!(verify_internal(params, &pk, &mp, &sig));
         let mp_bad = message_prime(b"", b"different message");
         assert!(!verify_internal(params, &pk, &mp_bad, &sig));
@@ -576,7 +575,7 @@ mod tests {
         keygen_internal(&ML_DSA_44, &[2u8; 32], &mut pk2, &mut sk2).unwrap();
         let mp = message_prime(b"", b"msg");
         let mut sig = vec![0u8; ML_DSA_44.sig_bytes];
-        sign_internal(&ML_DSA_44, &sk1, &mp, &[0u8; 32], &mut sig);
+        sign_internal(&ML_DSA_44, &sk1, &mp, &[0u8; 32], &mut sig).unwrap();
         assert!(verify_internal(&ML_DSA_44, &pk1, &mp, &sig));
         assert!(!verify_internal(&ML_DSA_44, &pk2, &mp, &sig));
     }
@@ -598,8 +597,8 @@ mod tests {
         let rnd = [0x29u8; 32];
         let mut sig_nct = vec![0u8; params.sig_bytes];
         let mut sig_ct = vec![0u8; params.sig_bytes];
-        sign_internal_impl::<K, L, Nct>(params, &sk_nct, &mp, &rnd, &mut sig_nct);
-        sign_internal_impl::<K, L, Ct>(params, &sk_ct, &mp, &rnd, &mut sig_ct);
+        sign_internal_impl::<K, L, Nct>(params, &sk_nct, &mp, &rnd, &mut sig_nct).unwrap();
+        sign_internal_impl::<K, L, Ct>(params, &sk_ct, &mp, &rnd, &mut sig_ct).unwrap();
         assert_eq!(sig_nct, sig_ct, "signature Nct/Ct mismatch");
 
         assert!(verify_internal_impl::<K, L, Nct>(

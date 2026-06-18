@@ -105,7 +105,9 @@ fn acvp_ml_dsa_44_siggen_internal_deterministic() {
         |sk_bytes, msg| {
             let mut sk = [0u8; ml_dsa_44::SK_BYTES];
             sk.copy_from_slice(sk_bytes);
-            ml_dsa_44::sign_internal(&sk, msg, &[0u8; 32]).to_vec()
+            ml_dsa_44::sign_internal(&sk, msg, &[0u8; 32])
+                .unwrap()
+                .to_vec()
         },
     );
 }
@@ -120,7 +122,9 @@ fn acvp_ml_dsa_65_siggen_internal_deterministic() {
         |sk_bytes, msg| {
             let mut sk = [0u8; ml_dsa_65::SK_BYTES];
             sk.copy_from_slice(sk_bytes);
-            ml_dsa_65::sign_internal(&sk, msg, &[0u8; 32]).to_vec()
+            ml_dsa_65::sign_internal(&sk, msg, &[0u8; 32])
+                .unwrap()
+                .to_vec()
         },
     );
 }
@@ -135,7 +139,9 @@ fn acvp_ml_dsa_87_siggen_internal_deterministic() {
         |sk_bytes, msg| {
             let mut sk = [0u8; ml_dsa_87::SK_BYTES];
             sk.copy_from_slice(sk_bytes);
-            ml_dsa_87::sign_internal(&sk, msg, &[0u8; 32]).to_vec()
+            ml_dsa_87::sign_internal(&sk, msg, &[0u8; 32])
+                .unwrap()
+                .to_vec()
         },
     );
 }
