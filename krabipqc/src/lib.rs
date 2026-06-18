@@ -52,6 +52,7 @@ pub mod params;
 pub mod poly;
 pub mod polyvec;
 pub(crate) mod rounding;
+pub mod rustcrypto;
 pub(crate) mod sampling;
 
 pub use ml_dsa::{ml_dsa_44, ml_dsa_65, ml_dsa_87};
