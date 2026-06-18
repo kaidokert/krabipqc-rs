@@ -13,28 +13,33 @@ macro_rules! per_set {
         pub mod $mod {
             use fixed_bigint::Ct;
 
+            use core::convert::Infallible;
+
             use crate::internal;
             use crate::params::$params;
+            use crate::{EncodeError, KeyGenError, SignError};
 
             pub const PK_BYTES: usize = $params.pk_bytes;
             pub const SK_BYTES: usize = $params.sk_bytes;
             pub const SIG_BYTES: usize = $params.sig_bytes;
 
-            pub fn keygen_internal(xi: &[u8; 32]) -> ([u8; PK_BYTES], [u8; SK_BYTES]) {
+            pub fn keygen_internal(
+                xi: &[u8; 32],
+            ) -> Result<([u8; PK_BYTES], [u8; SK_BYTES]), EncodeError> {
                 let mut pk = [0u8; PK_BYTES];
                 let mut sk = [0u8; SK_BYTES];
-                internal::keygen_internal(&$params, xi, &mut pk, &mut sk);
-                (pk, sk)
+                internal::keygen_internal(&$params, xi, &mut pk, &mut sk)?;
+                Ok((pk, sk))
             }
 
             pub fn sign_internal(
                 sk: &[u8; SK_BYTES],
                 m_prime: &[u8],
                 rnd: &[u8; 32],
-            ) -> [u8; SIG_BYTES] {
+            ) -> Result<[u8; SIG_BYTES], EncodeError> {
                 let mut sig = [0u8; SIG_BYTES];
-                internal::sign_internal(&$params, sk, m_prime, rnd, &mut sig);
-                sig
+                internal::sign_internal(&$params, sk, m_prime, rnd, &mut sig)?;
+                Ok(sig)
             }
 
             pub fn verify_internal(
@@ -46,11 +51,13 @@ macro_rules! per_set {
             }
 
             /// CT-flavored sibling of [`keygen_internal`].
-            pub fn keygen_internal_ct(xi: &[u8; 32]) -> ([u8; PK_BYTES], [u8; SK_BYTES]) {
+            pub fn keygen_internal_ct(
+                xi: &[u8; 32],
+            ) -> Result<([u8; PK_BYTES], [u8; SK_BYTES]), EncodeError> {
                 let mut pk = [0u8; PK_BYTES];
                 let mut sk = [0u8; SK_BYTES];
-                internal::keygen_internal_impl::<_, _, Ct>(&$params, xi, &mut pk, &mut sk);
-                (pk, sk)
+                internal::keygen_internal_impl::<_, _, Ct>(&$params, xi, &mut pk, &mut sk)?;
+                Ok((pk, sk))
             }
 
             /// CT-flavored sibling of [`sign_internal`].
@@ -58,10 +65,10 @@ macro_rules! per_set {
                 sk: &[u8; SK_BYTES],
                 m_prime: &[u8],
                 rnd: &[u8; 32],
-            ) -> [u8; SIG_BYTES] {
+            ) -> Result<[u8; SIG_BYTES], EncodeError> {
                 let mut sig = [0u8; SIG_BYTES];
-                internal::sign_internal_impl::<_, _, Ct>(&$params, sk, m_prime, rnd, &mut sig);
-                sig
+                internal::sign_internal_impl::<_, _, Ct>(&$params, sk, m_prime, rnd, &mut sig)?;
+                Ok(sig)
             }
 
             /// CT-flavored sibling of [`verify_internal`].
@@ -77,16 +84,17 @@ macro_rules! per_set {
             /// representative `M' = 0x00 || |ctx| || ctx || M` from
             /// the four input pieces, absorbing them directly into
             /// SHAKE-256 without a contiguous `M'` buffer. Returns
-            /// `None` if `ctx.len() > 255` (the only failure mode for
-            /// pure-mode signing).
+            /// `CtxTooLong` if `ctx.len() > 255`; the `Encode` arm is
+            /// structurally unreachable for in-tree const-sized inputs
+            /// but surfaced rather than panicked.
             pub fn sign(
                 sk: &[u8; SK_BYTES],
                 m: &[u8],
                 ctx: &[u8],
                 rnd: &[u8; 32],
-            ) -> Option<[u8; SIG_BYTES]> {
+            ) -> Result<[u8; SIG_BYTES], SignError<Infallible>> {
                 if ctx.len() > 255 {
-                    return None;
+                    return Err(SignError::CtxTooLong);
                 }
                 let prefix = [0x00u8];
                 let ctx_len = [ctx.len() as u8];
@@ -94,8 +102,8 @@ macro_rules! per_set {
                 let mut sig = [0u8; SIG_BYTES];
                 internal::sign_internal_impl_pieces::<_, _, fixed_bigint::Nct>(
                     &$params, sk, pieces, rnd, &mut sig,
-                );
-                Some(sig)
+                )?;
+                Ok(sig)
             }
 
             /// CT-flavored sibling of [`sign`].
@@ -104,9 +112,9 @@ macro_rules! per_set {
                 m: &[u8],
                 ctx: &[u8],
                 rnd: &[u8; 32],
-            ) -> Option<[u8; SIG_BYTES]> {
+            ) -> Result<[u8; SIG_BYTES], SignError<Infallible>> {
                 if ctx.len() > 255 {
-                    return None;
+                    return Err(SignError::CtxTooLong);
                 }
                 let prefix = [0x00u8];
                 let ctx_len = [ctx.len() as u8];
@@ -114,8 +122,8 @@ macro_rules! per_set {
                 let mut sig = [0u8; SIG_BYTES];
                 internal::sign_internal_impl_pieces::<_, _, Ct>(
                     &$params, sk, pieces, rnd, &mut sig,
-                );
-                Some(sig)
+                )?;
+                Ok(sig)
             }
 
             /// Pure ML-DSA Verify (FIPS 204 §5.2). Builds the message
@@ -193,15 +201,15 @@ macro_rules! per_set {
 
             /// HashML-DSA Sign (FIPS 204 §5.4). Caller hashes the
             /// message externally and passes the digest via [`PreHash`].
-            /// Returns `None` if `ctx.len() > 255`.
+            /// Returns `CtxTooLong` if `ctx.len() > 255`.
             pub fn hash_sign(
                 sk: &[u8; SK_BYTES],
                 ph: &PreHash,
                 ctx: &[u8],
                 rnd: &[u8; 32],
-            ) -> Option<[u8; SIG_BYTES]> {
+            ) -> Result<[u8; SIG_BYTES], SignError<Infallible>> {
                 if ctx.len() > 255 {
-                    return None;
+                    return Err(SignError::CtxTooLong);
                 }
                 let prefix = [0x01u8];
                 let ctx_len = [ctx.len() as u8];
@@ -210,8 +218,8 @@ macro_rules! per_set {
                 let mut sig = [0u8; SIG_BYTES];
                 internal::sign_internal_impl_pieces::<_, _, fixed_bigint::Nct>(
                     &$params, sk, pieces, rnd, &mut sig,
-                );
-                Some(sig)
+                )?;
+                Ok(sig)
             }
 
             /// CT-flavored sibling of [`hash_sign`].
@@ -220,9 +228,9 @@ macro_rules! per_set {
                 ph: &PreHash,
                 ctx: &[u8],
                 rnd: &[u8; 32],
-            ) -> Option<[u8; SIG_BYTES]> {
+            ) -> Result<[u8; SIG_BYTES], SignError<Infallible>> {
                 if ctx.len() > 255 {
-                    return None;
+                    return Err(SignError::CtxTooLong);
                 }
                 let prefix = [0x01u8];
                 let ctx_len = [ctx.len() as u8];
@@ -231,8 +239,8 @@ macro_rules! per_set {
                 let mut sig = [0u8; SIG_BYTES];
                 internal::sign_internal_impl_pieces::<_, _, Ct>(
                     &$params, sk, pieces, rnd, &mut sig,
-                );
-                Some(sig)
+                )?;
+                Ok(sig)
             }
 
             /// HashML-DSA Verify (FIPS 204 §5.4): pre-hashed message
@@ -281,10 +289,10 @@ macro_rules! per_set {
             /// from `rng`; returns `(pk, sk)`.
             pub fn keygen<R: rand_core::TryCryptoRng + ?Sized>(
                 rng: &mut R,
-            ) -> Result<([u8; PK_BYTES], [u8; SK_BYTES]), R::Error> {
+            ) -> Result<([u8; PK_BYTES], [u8; SK_BYTES]), KeyGenError<R::Error>> {
                 let mut xi = zeroize::Zeroizing::new([0u8; 32]);
-                rng.try_fill_bytes(&mut *xi)?;
-                Ok(keygen_internal(&xi))
+                rng.try_fill_bytes(&mut *xi).map_err(KeyGenError::Rng)?;
+                Ok(keygen_internal(&xi)?)
             }
 
             /// RNG-driven pure ML-DSA Sign. Draws the 32-byte `rnd`
@@ -296,14 +304,13 @@ macro_rules! per_set {
                 m: &[u8],
                 ctx: &[u8],
                 rng: &mut R,
-            ) -> Result<[u8; SIG_BYTES], crate::SignError<R::Error>> {
+            ) -> Result<[u8; SIG_BYTES], SignError<R::Error>> {
                 if ctx.len() > 255 {
-                    return Err(crate::SignError::CtxTooLong);
+                    return Err(SignError::CtxTooLong);
                 }
-                let mut rnd = [0u8; 32];
-                rng.try_fill_bytes(&mut rnd)
-                    .map_err(crate::SignError::Rng)?;
-                Ok(sign(sk, m, ctx, &rnd).expect("ctx already validated"))
+                let mut rnd = zeroize::Zeroizing::new([0u8; 32]);
+                rng.try_fill_bytes(&mut *rnd).map_err(SignError::Rng)?;
+                sign(sk, m, ctx, &rnd).map_err(lift_sign_err)
             }
 
             /// CT-flavored sibling of [`sign_random`].
@@ -312,14 +319,13 @@ macro_rules! per_set {
                 m: &[u8],
                 ctx: &[u8],
                 rng: &mut R,
-            ) -> Result<[u8; SIG_BYTES], crate::SignError<R::Error>> {
+            ) -> Result<[u8; SIG_BYTES], SignError<R::Error>> {
                 if ctx.len() > 255 {
-                    return Err(crate::SignError::CtxTooLong);
+                    return Err(SignError::CtxTooLong);
                 }
-                let mut rnd = [0u8; 32];
-                rng.try_fill_bytes(&mut rnd)
-                    .map_err(crate::SignError::Rng)?;
-                Ok(sign_ct(sk, m, ctx, &rnd).expect("ctx already validated"))
+                let mut rnd = zeroize::Zeroizing::new([0u8; 32]);
+                rng.try_fill_bytes(&mut *rnd).map_err(SignError::Rng)?;
+                sign_ct(sk, m, ctx, &rnd).map_err(lift_sign_err)
             }
 
             /// RNG-driven HashML-DSA Sign.
@@ -328,14 +334,13 @@ macro_rules! per_set {
                 ph: &PreHash,
                 ctx: &[u8],
                 rng: &mut R,
-            ) -> Result<[u8; SIG_BYTES], crate::SignError<R::Error>> {
+            ) -> Result<[u8; SIG_BYTES], SignError<R::Error>> {
                 if ctx.len() > 255 {
-                    return Err(crate::SignError::CtxTooLong);
+                    return Err(SignError::CtxTooLong);
                 }
-                let mut rnd = [0u8; 32];
-                rng.try_fill_bytes(&mut rnd)
-                    .map_err(crate::SignError::Rng)?;
-                Ok(hash_sign(sk, ph, ctx, &rnd).expect("ctx already validated"))
+                let mut rnd = zeroize::Zeroizing::new([0u8; 32]);
+                rng.try_fill_bytes(&mut *rnd).map_err(SignError::Rng)?;
+                hash_sign(sk, ph, ctx, &rnd).map_err(lift_sign_err)
             }
 
             /// CT-flavored sibling of [`hash_sign_random`].
@@ -344,14 +349,26 @@ macro_rules! per_set {
                 ph: &PreHash,
                 ctx: &[u8],
                 rng: &mut R,
-            ) -> Result<[u8; SIG_BYTES], crate::SignError<R::Error>> {
+            ) -> Result<[u8; SIG_BYTES], SignError<R::Error>> {
                 if ctx.len() > 255 {
-                    return Err(crate::SignError::CtxTooLong);
+                    return Err(SignError::CtxTooLong);
                 }
-                let mut rnd = [0u8; 32];
-                rng.try_fill_bytes(&mut rnd)
-                    .map_err(crate::SignError::Rng)?;
-                Ok(hash_sign_ct(sk, ph, ctx, &rnd).expect("ctx already validated"))
+                let mut rnd = zeroize::Zeroizing::new([0u8; 32]);
+                rng.try_fill_bytes(&mut *rnd).map_err(SignError::Rng)?;
+                hash_sign_ct(sk, ph, ctx, &rnd).map_err(lift_sign_err)
+            }
+
+            /// Reshape a non-RNG `SignError<Infallible>` from `sign` /
+            /// `hash_sign` into the `SignError<R::Error>` that the
+            /// RNG-driven entry points return. The `Rng` arm wraps the
+            /// uninhabited `Infallible`, so the `match never {}` is
+            /// provably dead code.
+            fn lift_sign_err<E>(e: SignError<Infallible>) -> SignError<E> {
+                match e {
+                    SignError::CtxTooLong => SignError::CtxTooLong,
+                    SignError::Encode(x) => SignError::Encode(x),
+                    SignError::Rng(never) => match never {},
+                }
             }
         }
     };

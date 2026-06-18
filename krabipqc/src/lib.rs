@@ -12,7 +12,7 @@
 //! use krabipqc::ml_dsa_44;
 //!
 //! let xi = [0x42u8; 32];
-//! let (pk, sk) = ml_dsa_44::keygen_internal(&xi);
+//! let (pk, sk) = ml_dsa_44::keygen_internal(&xi).unwrap();
 //!
 //! let rnd = [0xC3u8; 32];
 //! let sig = ml_dsa_44::sign(&sk, b"hello mldsa", b"app-ctx", &rnd).unwrap();
@@ -69,15 +69,40 @@ pub use modmath::{Field, FieldCt, FieldNct, MontStorage, Residue, ResidueCt, Res
 /// * [`SignError::Rng`] — the RNG returned an error while sampling
 ///   the per-signature 32-byte randomness input. `E` is the RNG's own
 ///   error type.
+/// * [`SignError::Encode`] — a structural buffer / codec mismatch.
+///   Unreachable in practice once the per-set facade has pinned sk /
+///   sig sizes via const generics; surfaced rather than panicked.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SignError<E> {
     CtxTooLong,
     Rng(E),
+    Encode(encoding::EncodeError),
+}
+
+impl<E> From<encoding::EncodeError> for SignError<E> {
+    fn from(e: encoding::EncodeError) -> Self {
+        SignError::Encode(e)
+    }
+}
+
+/// Error returned by the RNG-wrapped ML-DSA `keygen` entry point on
+/// each per-set facade.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum KeyGenError<E> {
+    Rng(E),
+    Encode(encoding::EncodeError),
+}
+
+impl<E> From<encoding::EncodeError> for KeyGenError<E> {
+    fn from(e: encoding::EncodeError) -> Self {
+        KeyGenError::Encode(e)
+    }
 }
 
 /// Error returned by the RNG-wrapped ML-KEM `keygen` / `encaps` entry
-/// points. `Encode` is a structural shape mismatch that can only fire
-/// on internal misuse (the per-set facade pins all buffer sizes).
+/// points on each per-set facade. `Encode` is a structural shape
+/// mismatch that can only fire on internal misuse (the per-set facade
+/// pins all buffer sizes).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum KemError<E> {
     Rng(E),

@@ -285,25 +285,24 @@ pub fn expand_mask<const L: usize>(
     mu: u16,
     gamma1: u32,
     gamma1_bits: usize,
-) -> PolyVec<u32, L> {
+) -> Result<PolyVec<u32, L>, EncodeError> {
     let mut out = PolyVec::<u32, L>::zero();
     // c = 1 + bitlen(gamma1 - 1); for gamma1 = 2^17, c = 18.
     let c_bits = 1 + gamma1_bits;
     let bytes_per_poly = N * c_bits / 8;
     // gamma1 = 2^19 → 640 bytes per poly; 1024 covers it with slack.
     let mut buf = [0u8; 32 * 32];
-    let buf = &mut buf[..bytes_per_poly];
+    let buf = buf
+        .get_mut(..bytes_per_poly)
+        .ok_or(EncodeError::BufferTooSmall)?;
     for r in 0..L {
         let mu_r = mu.wrapping_add(r as u16);
         let n_bytes = mu_r.to_le_bytes();
         let mut stream = Shake256Stream::new(&[rho_pp, &n_bytes]);
         stream.squeeze(buf);
-        // The local `buf` is sized exactly to `bytes_per_poly`, so
-        // bit_unpack_signed always succeeds; treat any error as a
-        // crate-internal invariant violation.
-        out.v[r] = bit_unpack_signed(buf, gamma1, c_bits).expect("buf sized to c_bits");
+        out.v[r] = bit_unpack_signed(buf, gamma1, c_bits)?;
     }
-    out
+    Ok(out)
 }
 
 /// BitUnpack (FIPS 204 Alg 18) for the signed range
@@ -423,7 +422,7 @@ mod tests {
     #[test]
     fn expand_mask_bounded() {
         let rho_pp = [3u8; 64];
-        let y = expand_mask::<L>(&rho_pp, 0, GAMMA1, GAMMA1_BITS);
+        let y = expand_mask::<L>(&rho_pp, 0, GAMMA1, GAMMA1_BITS).unwrap();
         for p in &y.v {
             for &c in &p.coeffs {
                 let s = to_signed(c, Q);
