@@ -17,8 +17,22 @@ pub trait FieldExt<P: Personality> {
     /// Canonical `u32` → Mont-form `u32`.
     fn reduce(canonical: u32, q: u32, n_prime: u32, r2_mod_q: u32) -> u32;
 
+    /// Mont-form `u32` → canonical `u32`. One REDC.
+    fn into_raw(mont: u32, q: u32, n_prime: u32) -> u32;
+
     /// Mont-domain multiplication: `(a·R)(b·R)/R = (a·b)·R`.
     fn mul_mont(a: u32, b: u32, q: u32, n_prime: u32) -> u32;
+
+    /// Wide multiply-accumulate: `(acc_lo, acc_hi) += a · b`. Caller
+    /// pairs `N` of these with a single [`Self::redc`] at the end to
+    /// get a fused inner product paying one REDC per output coefficient
+    /// instead of one per multiply. Safe while `N ≤ R/Q` (R = 2^32).
+    fn mul_acc(acc_lo: u32, acc_hi: u32, a: u32, b: u32) -> (u32, u32);
+
+    /// REDC of a double-width `(lo, hi)` Mont-domain accumulator,
+    /// folding back to a single-width `u32` in `[0, q)`. Pair with
+    /// [`Self::mul_acc`].
+    fn redc(acc_lo: u32, acc_hi: u32, q: u32, n_prime: u32) -> u32;
 
     /// Mont-domain addition (= canonical add mod `q`).
     #[inline]
@@ -39,8 +53,20 @@ impl FieldExt<Nct> for Nct {
         wide::mul::<u32>(canonical, r2_mod_q, q, n_prime)
     }
     #[inline]
+    fn into_raw(mont: u32, q: u32, n_prime: u32) -> u32 {
+        wide::redc::<u32>(mont, 0, q, n_prime)
+    }
+    #[inline]
     fn mul_mont(a: u32, b: u32, q: u32, n_prime: u32) -> u32 {
         wide::mul::<u32>(a, b, q, n_prime)
+    }
+    #[inline]
+    fn mul_acc(acc_lo: u32, acc_hi: u32, a: u32, b: u32) -> (u32, u32) {
+        wide::mul_acc::<u32>(acc_lo, acc_hi, a, b)
+    }
+    #[inline]
+    fn redc(acc_lo: u32, acc_hi: u32, q: u32, n_prime: u32) -> u32 {
+        wide::redc::<u32>(acc_lo, acc_hi, q, n_prime)
     }
 }
 
@@ -50,7 +76,19 @@ impl FieldExt<Ct> for Ct {
         wide::ct::mul::<u32>(canonical, r2_mod_q, q, n_prime)
     }
     #[inline]
+    fn into_raw(mont: u32, q: u32, n_prime: u32) -> u32 {
+        wide::ct::redc::<u32>(mont, 0, q, n_prime)
+    }
+    #[inline]
     fn mul_mont(a: u32, b: u32, q: u32, n_prime: u32) -> u32 {
         wide::ct::mul::<u32>(a, b, q, n_prime)
+    }
+    #[inline]
+    fn mul_acc(acc_lo: u32, acc_hi: u32, a: u32, b: u32) -> (u32, u32) {
+        wide::ct::mul_acc::<u32>(acc_lo, acc_hi, a, b)
+    }
+    #[inline]
+    fn redc(acc_lo: u32, acc_hi: u32, q: u32, n_prime: u32) -> u32 {
+        wide::ct::redc::<u32>(acc_lo, acc_hi, q, n_prime)
     }
 }

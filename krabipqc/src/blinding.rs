@@ -1,10 +1,11 @@
-//! Multiplicative scalar blinding for the secret-mixed `c · s_hat`
-//! product in ML-DSA sign. Each call picks a random `r ∈ Z_q*`,
-//! scales the secret operand by `r`, runs the multiplication, then
-//! unblinds by scaling the cofactor by `r^{-1}`. The product collapses
-//! to the unblinded value but the multiplier hardware only ever sees
-//! `s · r`, so per-coefficient correlation attacks need `r` to
-//! interpret the trace — and `r` never leaves the function.
+//! Multiplicative scalar blinding for the secret-mixed multiplications
+//! in ML-DSA sign (`c · s_hat`) and ML-KEM decaps (`s_hat · u_hat`).
+//! Each call picks a random `r ∈ Z_q*`, scales the secret operand by
+//! `r`, runs the multiplication, then unblinds by scaling the cofactor
+//! by `r^{-1}`. The product collapses to the unblinded value but the
+//! multiplier hardware only ever sees `s · r`, so per-coefficient
+//! correlation attacks need `r` to interpret the trace — and `r`
+//! never leaves the function.
 
 use fixed_bigint::Personality;
 use modmath::basic::pre_reduced as pr;
@@ -17,15 +18,21 @@ use crate::polyvec::PolyVec;
 /// Derive a Montgomery-form blinding factor `r ∈ [1, q-1]` and its
 /// inverse `r^{-1}` (also in Mont form). The personality dispatch
 /// picks the variable-time or constant-time Mont conversion.
+///
+/// `absorb` is the full SHAKE-256 input list — by convention the
+/// caller includes the per-op domain tag as the last piece (e.g.
+/// `&[rnd, b"krabipqc/sign-blind"]` for sign,
+/// `&[dk, ct, b"krabipqc/decaps-blind"]` for decaps) so the same `r`
+/// can never be derived across different operations on the same key
+/// material.
 pub fn derive_pair<P: Personality + FieldExt<P>>(
-    seed: &[u8],
-    domain_tag: &[u8],
+    absorb: &[&[u8]],
     q: u32,
     q_n_prime: u32,
     q_r2_mod_q: u32,
 ) -> (u32, u32) {
-    let r = derive_r(seed, domain_tag, q);
-    // Fermat inverse: r^(q-2) mod q. Once per signature, not hot.
+    let r = derive_r(absorb, q);
+    // Fermat inverse: r^(q-2) mod q. Once per call, not hot.
     let r_inv = pr::exp::<u32>(r, q - 2, q);
     (
         <P as FieldExt<P>>::reduce(r, q, q_n_prime, q_r2_mod_q),
@@ -33,9 +40,9 @@ pub fn derive_pair<P: Personality + FieldExt<P>>(
     )
 }
 
-fn derive_r(seed: &[u8], domain_tag: &[u8], q: u32) -> u32 {
+fn derive_r(absorb: &[&[u8]], q: u32) -> u32 {
     let mut buf = [0u8; 8];
-    shake256(&[seed, domain_tag], &mut buf);
+    shake256(absorb, &mut buf);
     let x = u32::from_le_bytes([buf[0], buf[1], buf[2], buf[3]]);
     // Lemire's bounded-random reduction: result is in [0, q-1] with a
     // tiny bias that's irrelevant for blinding. Constant-time on all
