@@ -44,7 +44,7 @@ fn compare(label: &str, got: &[u8], want: &[u8]) {
 fn acvp_ml_dsa_44_keygen_tc1() {
     let text = include_str!("kat_keygen_mldsa44_tc1.txt");
     let (xi, pk_exp, sk_exp) = parse_triple(text);
-    let (pk, sk) = ml_dsa_44::keygen_internal(&xi);
+    let (pk, sk) = ml_dsa_44::keygen_internal(&xi).unwrap();
     compare("pk", &pk, &pk_exp);
     compare("sk", &sk, &sk_exp);
 }
@@ -53,7 +53,7 @@ fn acvp_ml_dsa_44_keygen_tc1() {
 fn acvp_ml_dsa_65_keygen_tc26() {
     let text = include_str!("kat_keygen_mldsa65_tc26.txt");
     let (xi, pk_exp, sk_exp) = parse_triple(text);
-    let (pk, sk) = ml_dsa_65::keygen_internal(&xi);
+    let (pk, sk) = ml_dsa_65::keygen_internal(&xi).unwrap();
     compare("pk", &pk, &pk_exp);
     compare("sk", &sk, &sk_exp);
 }
@@ -62,7 +62,7 @@ fn acvp_ml_dsa_65_keygen_tc26() {
 fn acvp_ml_dsa_87_keygen_tc51() {
     let text = include_str!("kat_keygen_mldsa87_tc51.txt");
     let (xi, pk_exp, sk_exp) = parse_triple(text);
-    let (pk, sk) = ml_dsa_87::keygen_internal(&xi);
+    let (pk, sk) = ml_dsa_87::keygen_internal(&xi).unwrap();
     compare("pk", &pk, &pk_exp);
     compare("sk", &sk, &sk_exp);
 }

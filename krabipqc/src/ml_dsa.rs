@@ -15,16 +15,19 @@ macro_rules! per_set {
 
             use crate::internal;
             use crate::params::$params;
+            use crate::{EncodeError, KeyGenError};
 
             pub const PK_BYTES: usize = $params.pk_bytes;
             pub const SK_BYTES: usize = $params.sk_bytes;
             pub const SIG_BYTES: usize = $params.sig_bytes;
 
-            pub fn keygen_internal(xi: &[u8; 32]) -> ([u8; PK_BYTES], [u8; SK_BYTES]) {
+            pub fn keygen_internal(
+                xi: &[u8; 32],
+            ) -> Result<([u8; PK_BYTES], [u8; SK_BYTES]), EncodeError> {
                 let mut pk = [0u8; PK_BYTES];
                 let mut sk = [0u8; SK_BYTES];
-                internal::keygen_internal(&$params, xi, &mut pk, &mut sk);
-                (pk, sk)
+                internal::keygen_internal(&$params, xi, &mut pk, &mut sk)?;
+                Ok((pk, sk))
             }
 
             pub fn sign_internal(
@@ -46,11 +49,13 @@ macro_rules! per_set {
             }
 
             /// CT-flavored sibling of [`keygen_internal`].
-            pub fn keygen_internal_ct(xi: &[u8; 32]) -> ([u8; PK_BYTES], [u8; SK_BYTES]) {
+            pub fn keygen_internal_ct(
+                xi: &[u8; 32],
+            ) -> Result<([u8; PK_BYTES], [u8; SK_BYTES]), EncodeError> {
                 let mut pk = [0u8; PK_BYTES];
                 let mut sk = [0u8; SK_BYTES];
-                internal::keygen_internal_impl::<_, _, Ct>(&$params, xi, &mut pk, &mut sk);
-                (pk, sk)
+                internal::keygen_internal_impl::<_, _, Ct>(&$params, xi, &mut pk, &mut sk)?;
+                Ok((pk, sk))
             }
 
             /// CT-flavored sibling of [`sign_internal`].
@@ -281,10 +286,10 @@ macro_rules! per_set {
             /// from `rng`; returns `(pk, sk)`.
             pub fn keygen<R: rand_core::TryCryptoRng + ?Sized>(
                 rng: &mut R,
-            ) -> Result<([u8; PK_BYTES], [u8; SK_BYTES]), R::Error> {
+            ) -> Result<([u8; PK_BYTES], [u8; SK_BYTES]), KeyGenError<R::Error>> {
                 let mut xi = zeroize::Zeroizing::new([0u8; 32]);
-                rng.try_fill_bytes(&mut *xi)?;
-                Ok(keygen_internal(&xi))
+                rng.try_fill_bytes(&mut *xi).map_err(KeyGenError::Rng)?;
+                Ok(keygen_internal(&xi)?)
             }
 
             /// RNG-driven pure ML-DSA Sign. Draws the 32-byte `rnd`

@@ -29,17 +29,20 @@ use crate::sampling::{expand_a, expand_mask, expand_s, rej_ntt_poly, sample_in_b
 ///
 /// `xi` is the secret 32-byte seed. `pk_out` is filled with the
 /// canonical pk byte string; `sk_out` with the canonical sk byte
-/// string. Lengths must equal `params.pk_bytes` / `params.sk_bytes`.
+/// string. Returns `Err(EncodeError::BufferTooSmall)` if either
+/// output length doesn't match the parameter set.
 pub fn keygen_internal_impl<const K: usize, const L: usize, P>(
     params: &Params<K, L>,
     xi: &[u8; 32],
     pk_out: &mut [u8],
     sk_out: &mut [u8],
-) where
+) -> Result<(), encoding::EncodeError>
+where
     P: Personality + FieldExt<P>,
 {
-    assert_eq!(pk_out.len(), params.pk_bytes, "pk_out length");
-    assert_eq!(sk_out.len(), params.sk_bytes, "sk_out length");
+    if pk_out.len() != params.pk_bytes || sk_out.len() != params.sk_bytes {
+        return Err(encoding::EncodeError::BufferTooSmall);
+    }
 
     // Everything derived from `xi` is zeroize-on-drop; `rho` is public
     // (it lands in pk).
@@ -83,13 +86,11 @@ pub fn keygen_internal_impl<const K: usize, const L: usize, P>(
     let (t1, t0) = power2round_vec(&t);
     let t0: Zeroizing<PolyVec<u32, K>> = Zeroizing::new(t0);
 
-    // Buffer sizes are enforced by the caller — facades pass
-    // `[u8; PK_BYTES]` / `[u8; SK_BYTES]` arrays sized from `params`.
-    encoding::pk_encode(&rho, &t1, pk_out).expect("pk_out sized by caller");
+    encoding::pk_encode(&rho, &t1, pk_out)?;
     let mut tr = [0u8; 64];
     shake256(&[pk_out], &mut tr);
-    encoding::sk_encode(params, &rho, &big_k, &tr, &s1, &s2, &t0, sk_out)
-        .expect("sk_out sized by caller");
+    encoding::sk_encode(params, &rho, &big_k, &tr, &s1, &s2, &t0, sk_out)?;
+    Ok(())
 }
 
 /// KeyGen_internal (Alg 6), Nct-default shim.
@@ -98,8 +99,8 @@ pub fn keygen_internal<const K: usize, const L: usize>(
     xi: &[u8; 32],
     pk_out: &mut [u8],
     sk_out: &mut [u8],
-) {
-    keygen_internal_impl::<K, L, Nct>(params, xi, pk_out, sk_out);
+) -> Result<(), encoding::EncodeError> {
+    keygen_internal_impl::<K, L, Nct>(params, xi, pk_out, sk_out)
 }
 
 /// Sign_internal (FIPS 204 Alg 7), generic over personality `P`.
@@ -543,7 +544,7 @@ mod tests {
         let xi = [0x42u8; 32];
         let mut pk = vec![0u8; params.pk_bytes];
         let mut sk = vec![0u8; params.sk_bytes];
-        keygen_internal(params, &xi, &mut pk, &mut sk);
+        keygen_internal(params, &xi, &mut pk, &mut sk).unwrap();
         let mp = message_prime(b"", b"hello mldsa");
         let mut sig = vec![0u8; params.sig_bytes];
         sign_internal(params, &sk, &mp, &[0xC3u8; 32], &mut sig);
@@ -571,8 +572,8 @@ mod tests {
         let mut sk1 = vec![0u8; ML_DSA_44.sk_bytes];
         let mut pk2 = vec![0u8; ML_DSA_44.pk_bytes];
         let mut sk2 = vec![0u8; ML_DSA_44.sk_bytes];
-        keygen_internal(&ML_DSA_44, &[1u8; 32], &mut pk1, &mut sk1);
-        keygen_internal(&ML_DSA_44, &[2u8; 32], &mut pk2, &mut sk2);
+        keygen_internal(&ML_DSA_44, &[1u8; 32], &mut pk1, &mut sk1).unwrap();
+        keygen_internal(&ML_DSA_44, &[2u8; 32], &mut pk2, &mut sk2).unwrap();
         let mp = message_prime(b"", b"msg");
         let mut sig = vec![0u8; ML_DSA_44.sig_bytes];
         sign_internal(&ML_DSA_44, &sk1, &mp, &[0u8; 32], &mut sig);
@@ -588,8 +589,8 @@ mod tests {
         let mut sk_nct = vec![0u8; params.sk_bytes];
         let mut pk_ct = vec![0u8; params.pk_bytes];
         let mut sk_ct = vec![0u8; params.sk_bytes];
-        keygen_internal_impl::<K, L, Nct>(params, &xi, &mut pk_nct, &mut sk_nct);
-        keygen_internal_impl::<K, L, Ct>(params, &xi, &mut pk_ct, &mut sk_ct);
+        keygen_internal_impl::<K, L, Nct>(params, &xi, &mut pk_nct, &mut sk_nct).unwrap();
+        keygen_internal_impl::<K, L, Ct>(params, &xi, &mut pk_ct, &mut sk_ct).unwrap();
         assert_eq!(pk_nct, pk_ct, "pk Nct/Ct mismatch");
         assert_eq!(sk_nct, sk_ct, "sk Nct/Ct mismatch");
 
