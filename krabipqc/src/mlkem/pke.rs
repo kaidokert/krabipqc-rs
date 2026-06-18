@@ -56,13 +56,16 @@ where
     sigma.copy_from_slice(sigma_src);
 
     let a_hat = expand_a::<K>(&rho);
-    let (mut s, mut e) = sample_se::<K>(&sigma, params.eta1)?;
+    // Wrap sample_se's secret output directly into Zeroizing so the
+    // raw tuple never lives un-zeroized on the stack across the NTT
+    // loop. NTT then mutates the secret in place through the wrap.
+    let (s_raw, e_raw) = sample_se::<K>(&sigma, params.eta1)?;
+    let mut s_hat: Zeroizing<PolyVec<u32, K>> = Zeroizing::new(s_raw);
+    let mut e_hat: Zeroizing<PolyVec<u32, K>> = Zeroizing::new(e_raw);
     for i in 0..K {
-        ntt::ntt::<P>(&mut s.v[i]);
-        ntt::ntt::<P>(&mut e.v[i]);
+        ntt::ntt::<P>(&mut s_hat.v[i]);
+        ntt::ntt::<P>(&mut e_hat.v[i]);
     }
-    let s_hat: Zeroizing<PolyVec<u32, K>> = Zeroizing::new(s);
-    let e_hat: Zeroizing<PolyVec<u32, K>> = Zeroizing::new(e);
 
     // t_hat[i] = sum_j a_hat[i][j] * s_hat[j]  +  e_hat[i]
     let mut t_hat_raw = PolyVec::<u32, K>::zero();
@@ -111,12 +114,13 @@ where
     }
     rho.copy_from_slice(rho_src);
 
-    // y, e1, e2 are derived from `r` (secret in the FO re-encrypt path),
-    // so wrap them and the per-iteration transients in Zeroizing.
-    let (y, e1, e2) = sample_re::<K>(r, params.eta1, params.eta2)?;
-    let mut y: Zeroizing<PolyVec<u32, K>> = Zeroizing::new(y);
-    let e1: Zeroizing<PolyVec<u32, K>> = Zeroizing::new(e1);
-    let e2: Zeroizing<Poly<u32>> = Zeroizing::new(e2);
+    // y, e1, e2 are derived from `r` (secret in the FO re-encrypt path).
+    // Wrap immediately so the raw sample_re output doesn't outlive its
+    // destructure on the stack.
+    let (y_raw, e1_raw, e2_raw) = sample_re::<K>(r, params.eta1, params.eta2)?;
+    let mut y: Zeroizing<PolyVec<u32, K>> = Zeroizing::new(y_raw);
+    let e1: Zeroizing<PolyVec<u32, K>> = Zeroizing::new(e1_raw);
+    let e2: Zeroizing<Poly<u32>> = Zeroizing::new(e2_raw);
     for i in 0..K {
         ntt::ntt::<P>(&mut y.v[i]);
     }

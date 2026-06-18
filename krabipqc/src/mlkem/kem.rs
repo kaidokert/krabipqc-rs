@@ -87,10 +87,13 @@ where
     ek_modulus_check::<K>(t_hat_bytes)?;
 
     let h_ek = sha3_256(&[ek]);
-    let g_out = sha3_512(&[m, &h_ek]);
+    // g_out splits into (ss, r): both are secret-derived (ss is the
+    // shared secret, r is the FO encryption coin). Match
+    // decaps_internal_impl's hygiene by Zeroizing both.
+    let g_out = Zeroizing::new(sha3_512(&[m, &h_ek]));
     let ss_src = g_out.get(..32).ok_or(EncodeError::BufferTooSmall)?;
     ss_out.copy_from_slice(ss_src);
-    let mut r = [0u8; 32];
+    let mut r = Zeroizing::new([0u8; 32]);
     let r_src = g_out.get(32..).ok_or(EncodeError::BufferTooSmall)?;
     r.copy_from_slice(r_src);
 

@@ -7,6 +7,8 @@
 use fixed_bigint::Nct;
 use modmath::basic::pre_reduced as pr;
 
+use zeroize::Zeroizing;
+
 use crate::encoding::EncodeError;
 use crate::field_ext::FieldExt;
 use crate::hashing::{Shake128Stream, Shake256Stream};
@@ -80,7 +82,9 @@ pub fn sample_poly_cbd(bytes: &[u8], eta: Eta) -> Result<Poly<u32>, EncodeError>
 /// distribution. Inlines the buffer so callers don't move a
 /// [`PRF_BUF_LEN`]-byte array around by value.
 fn sample_cbd_from_seed(s: &[u8; 32], b: u8, eta: Eta) -> Result<Poly<u32>, EncodeError> {
-    let mut buf = [0u8; PRF_BUF_LEN];
+    // The squeezed bytes become CBD-sampled secret coefficients, so
+    // wrap the scratch buffer in Zeroizing to clear it on return.
+    let mut buf: Zeroizing<[u8; PRF_BUF_LEN]> = Zeroizing::new([0u8; PRF_BUF_LEN]);
     let slot = buf
         .get_mut(..eta.buf_len())
         .ok_or(EncodeError::BufferTooSmall)?;
