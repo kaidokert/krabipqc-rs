@@ -25,7 +25,7 @@ use core::fmt;
 use kem::common::array::{Array, sizes};
 use kem::common::typenum::{Unsigned, consts::U32};
 use kem::{
-    Decapsulate, Decapsulator, Encapsulate, Generate, Kem, KeyExport, KeyInit, KeySizeUser,
+    Decapsulator, Encapsulate, Generate, Kem, KeyExport, KeyInit, KeySizeUser, TryDecapsulate,
     TryKeyInit,
 };
 use rand_core::{CryptoRng, TryCryptoRng};
@@ -137,6 +137,7 @@ macro_rules! impl_mlkem_kem {
                 let mut z = Zeroizing::new([0u8; 32]);
                 rng.try_fill_bytes(&mut *d)?;
                 rng.try_fill_bytes(&mut *z)?;
+                // TODO: drop .expect — trait's R::Error can't carry EncodeError without a breaking where bound.
                 let (ek_bytes, sk_bytes) = crate::$facade::keygen_internal(&d, &z)
                     .expect("keygen_internal infallible on facade-pinned buffer sizes");
                 let ek = $ek_struct {
@@ -155,15 +156,20 @@ macro_rules! impl_mlkem_kem {
             }
         }
 
-        impl Decapsulate for $dk_struct {
-            fn decapsulate(&self, ct: &Array<u8, sizes::$ct_size>) -> Array<u8, U32> {
+        // Only `TryDecapsulate` (not the infallible `Decapsulate`) so the
+        // facade's structural EncodeError surfaces as an Err instead of
+        // panicking. Callers reach for `try_decapsulate` directly.
+        impl TryDecapsulate for $dk_struct {
+            type Error = crate::EncodeError;
+
+            fn try_decapsulate(
+                &self,
+                ct: &Array<u8, sizes::$ct_size>,
+            ) -> Result<Array<u8, U32>, Self::Error> {
                 let sk_arr: &[u8; crate::$facade::DK_BYTES] = (&*self.sk).into();
                 let ct_arr: &[u8; crate::$facade::CT_BYTES] = ct.into();
-                // The trait is infallible. The facade's only failure
-                // arm is BufferTooSmall, structurally unreachable here.
-                let ss = crate::$facade::decaps_internal(sk_arr, ct_arr)
-                    .expect("decaps_internal infallible on facade-pinned buffer sizes");
-                Array::from(ss)
+                let ss = crate::$facade::decaps_internal(sk_arr, ct_arr)?;
+                Ok(Array::from(ss))
             }
         }
 
@@ -178,11 +184,9 @@ macro_rules! impl_mlkem_kem {
                 R: CryptoRng + ?Sized,
             {
                 let ek_arr: &[u8; crate::$facade::EK_BYTES] = (&self.ek).into();
-                // ek was validated at TryKeyInit boundary, m and the
-                // output buffers are pinned, so encaps_internal has no
-                // reachable failure mode here.
                 let mut m = Zeroizing::new([0u8; 32]);
                 rand_core::Rng::fill_bytes(rng, &mut *m);
+                // TODO: drop .expect — needs const-generic Params buffer sizes + CanonicalEk typestate.
                 let (ss_bytes, ct_bytes) = crate::$facade::encaps_internal(ek_arr, &m)
                     .expect("encaps_internal infallible: ek validated, buffers pinned");
                 (Array::from(ct_bytes), Array::from(ss_bytes))
@@ -355,6 +359,7 @@ macro_rules! impl_mldsa_sig {
                 // squeeze through R::Error.
                 let mut xi = Zeroizing::new([0u8; 32]);
                 rng.try_fill_bytes(&mut *xi)?;
+                // TODO: drop .expect — trait's R::Error can't carry EncodeError without a breaking where bound.
                 let (pk_bytes, sk_bytes) = crate::$facade::keygen_internal(&xi)
                     .expect("keygen_internal infallible on facade-pinned buffer sizes");
                 Ok(Self {
@@ -432,7 +437,7 @@ mod tests {
 
         let mut crng = FixedRng(0x77);
         let (ct, ss_send) = ek.encapsulate_with_rng(&mut crng);
-        let ss_recv = dk.decapsulate(&ct);
+        let ss_recv = dk.try_decapsulate(&ct).unwrap();
         assert_eq!(ss_send, ss_recv);
     }
 
