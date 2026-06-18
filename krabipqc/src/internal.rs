@@ -175,7 +175,7 @@ pub fn sign_internal_impl_pieces<const K: usize, const L: usize, P>(
     // the multiplier sees `s · r` instead of `s`. `r` never leaves
     // the function.
     let (r_mont, r_inv_mont) =
-        blinding::derive_pair::<P>(rnd, b"krabipqc/sign-blind", Q, Q_N_PRIME, Q_R2_MOD_Q);
+        blinding::derive_pair::<P>(&[rnd, b"krabipqc/sign-blind"], Q, Q_N_PRIME, Q_R2_MOD_Q);
     blinding::scale_polyvec_mont::<P, L>(&mut s1_hat, r_mont, Q, Q_N_PRIME);
     blinding::scale_polyvec_mont::<P, K>(&mut s2_hat, r_mont, Q, Q_N_PRIME);
     blinding::scale_polyvec_mont::<P, K>(&mut t0_hat, r_mont, Q, Q_N_PRIME);

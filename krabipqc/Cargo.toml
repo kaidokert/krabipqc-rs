@@ -11,7 +11,7 @@ categories = ["cryptography", "no-std", "no-std::no-alloc"]
 
 [dependencies]
 # All Z_q arithmetic flows through modmath.
-modmath = { version = "0.3.0", features = ["wide-mul", "zeroize"] }
+modmath = { version = "0.3.1", features = ["wide-mul", "zeroize"] }
 
 # SHAKE-128 / SHAKE-256 / SHA3-256 / SHA3-512 wrappers in `hashing.rs`.
 sha3 = { version = "0.10", default-features = false }

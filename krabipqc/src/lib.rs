@@ -45,6 +45,8 @@ pub(crate) mod field_ext;
 pub mod hashing;
 pub(crate) mod internal;
 mod ml_dsa;
+mod ml_kem;
+pub(crate) mod mlkem;
 pub(crate) mod ntt;
 pub mod params;
 pub mod poly;
@@ -53,7 +55,9 @@ pub(crate) mod rounding;
 pub(crate) mod sampling;
 
 pub use ml_dsa::{ml_dsa_44, ml_dsa_65, ml_dsa_87};
+pub use ml_kem::{ml_kem_512, ml_kem_768, ml_kem_1024};
 
+pub use encoding::EncodeError;
 pub use fixed_bigint::{Ct, Nct, Personality};
 pub use modmath::{Field, FieldCt, FieldNct, MontStorage, Residue, ResidueCt, ResidueNct};
 
@@ -69,4 +73,19 @@ pub use modmath::{Field, FieldCt, FieldNct, MontStorage, Residue, ResidueCt, Res
 pub enum SignError<E> {
     CtxTooLong,
     Rng(E),
+}
+
+/// Error returned by the RNG-wrapped ML-KEM `keygen` / `encaps` entry
+/// points. `Encode` is a structural shape mismatch that can only fire
+/// on internal misuse (the per-set facade pins all buffer sizes).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum KemError<E> {
+    Rng(E),
+    Encode(encoding::EncodeError),
+}
+
+impl<E> From<encoding::EncodeError> for KemError<E> {
+    fn from(e: encoding::EncodeError) -> Self {
+        KemError::Encode(e)
+    }
 }
