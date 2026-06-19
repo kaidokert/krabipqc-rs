@@ -39,32 +39,46 @@ TIMEOUT_BUILD = 600
 
 
 def run_cmd(args, timeout, **kwargs):
-    result = subprocess.run(
-        args, capture_output=True, text=True, timeout=timeout, **kwargs
-    )
-    return result.returncode, result.stdout, result.stderr
+    try:
+        result = subprocess.run(
+            args, capture_output=True, text=True, timeout=timeout, **kwargs
+        )
+        return result.returncode, result.stdout, result.stderr
+    except FileNotFoundError:
+        return -1, "", f"command not found: {args[0]}"
 
 
 def build_examples():
-    rc, _out, err = run_cmd(
-        ["cargo", "build", "--target", TARGET, "--release", "--examples"],
-        timeout=TIMEOUT_BUILD,
-    )
+    try:
+        rc, out, err = run_cmd(
+            ["cargo", "build", "--target", TARGET, "--release", "--examples"],
+            timeout=TIMEOUT_BUILD,
+        )
+    except subprocess.TimeoutExpired:
+        print(f"BUILD TIMEOUT: cargo build exceeded {TIMEOUT_BUILD}s", file=sys.stderr)
+        return False
     if rc != 0:
-        print(f"BUILD FAILED for {TARGET}:\n{err}", file=sys.stderr)
+        snippet_limit = 4000
+        print(f"BUILD FAILED for {TARGET}:", file=sys.stderr)
+        if out:
+            print(f"--- stdout (tail) ---\n{out[-snippet_limit:]}", file=sys.stderr)
+        if err:
+            print(f"--- stderr (tail) ---\n{err[-snippet_limit:]}", file=sys.stderr)
         return False
     return True
 
 
 def run_qemu(example):
+    """Returns (rc, combined_output). A non-zero rc is a hard failure
+    regardless of any ACCEPT/REJECT string in the output."""
     rc, out, err = run_cmd(
         ["cargo", "run", "--target", TARGET, "--release", "--example", example],
         timeout=TIMEOUT_RUN,
     )
     combined = out + err
-    if rc != 0 and "ACCEPT" not in combined and "REJECT" not in combined:
+    if rc != 0:
         print(f"  cargo run failed (rc={rc}):\n{combined}", file=sys.stderr)
-    return combined
+    return rc, combined
 
 
 def text_size(example):
@@ -115,7 +129,7 @@ def main():
     for example, expected_algo, label in EXAMPLES:
         print(f"  Running {example}...", file=sys.stderr)
         try:
-            output = run_qemu(example)
+            rc, output = run_qemu(example)
         except subprocess.TimeoutExpired:
             failures.append(f"Timeout: {example}")
             rows.append((label, None, None, None, "TIMEOUT"))
@@ -125,6 +139,12 @@ def main():
         metric = parse_metric(output)
         tsize = text_size(example)
 
+        # Non-zero exit from `cargo run` always counts as a failure —
+        # a crashed or panicking run can still print ACCEPT/REJECT
+        # before tearing down, which would otherwise be silently
+        # treated as success.
+        if rc != 0:
+            failures.append(f"Non-zero exit: {example} (rc={rc})")
         if not accepted:
             failures.append(f"REJECT: {example}")
         if metric is None:
