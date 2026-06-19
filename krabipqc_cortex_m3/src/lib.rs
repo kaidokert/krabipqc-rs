@@ -26,16 +26,15 @@ pub fn target_arch_name() -> &'static str {
 
 pub fn test_fixture(testable: fn() -> bool, algo: &str, backend: &str) {
     hprintln!("setup");
+    // No semihosting between paint_stack and testable: semihosting
+    // calls cost tens of thousands of cycles AND use stack space, so
+    // any print inside the measured window inflates both the
+    // reported cycle count and the high-water mark.
     paint_stack();
-    hprintln!("painted");
     let counter = CycleCounter::new();
-    hprintln!("counter_started");
     let result = testable();
-    // Cycle counts are reported in thousands.
-    let elapsed = counter.elapsed() / 1000;
-    hprintln!("ran");
+    let elapsed = counter.elapsed() / 1000; // cycles reported in thousands
     let stack = check_stack_high_water_mark();
-    hprintln!("stack_checked");
     if result {
         hprintln!("{} ACCEPT", algo);
     } else {
@@ -57,10 +56,16 @@ pub fn test_fixture(testable: fn() -> bool, algo: &str, backend: &str) {
 }
 
 /// Stub "verify" used by the baseline build to measure harness overhead.
-/// Touches every input so the call cannot be optimized away.
+/// Touches every input so the call cannot be optimized away. Guards
+/// against empty slices so a malformed test vector doesn't panic the
+/// baseline run.
 #[inline(never)]
 pub fn fake_verify(pk: &[u8], msg: &[u8], sig: &[u8]) -> bool {
-    let folded = pk[0] ^ pk[pk.len() - 1] ^ sig[0] ^ sig[sig.len() - 1] ^ (msg.len() as u8);
+    let pk_first = pk.first().copied().unwrap_or(0);
+    let pk_last = pk.last().copied().unwrap_or(0);
+    let sig_first = sig.first().copied().unwrap_or(0);
+    let sig_last = sig.last().copied().unwrap_or(0);
+    let folded = pk_first ^ pk_last ^ sig_first ^ sig_last ^ (msg.len() as u8);
     black_box(folded);
     true
 }

@@ -6,8 +6,10 @@ use krabipqc_cortex_m3::test_fixture;
 use krabipqc_cortex_m3::test_vector::{KEM768_CT, KEM768_DK, KEM768_SS};
 
 fn decaps_and_check() -> bool {
-    let ss = krabipqc::ml_kem_768::decaps_internal(&KEM768_DK, &KEM768_CT).unwrap();
-    ss == KEM768_SS
+    match krabipqc::ml_kem_768::decaps_internal(&KEM768_DK, &KEM768_CT) {
+        Ok(ss) => ss == KEM768_SS,
+        Err(_) => false,
+    }
 }
 
 #[entry]

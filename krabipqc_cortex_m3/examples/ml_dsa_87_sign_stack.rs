@@ -3,21 +3,26 @@
 
 use cortex_m_rt::entry;
 use krabipqc_cortex_m3::test_fixture;
-use krabipqc_cortex_m3::test_vector::{MESSAGE, PK_87, RND, SK_87};
+use krabipqc_cortex_m3::test_vector::{MESSAGE, RND, SK_87};
 
-fn sign_and_verify() -> bool {
+fn sign() -> bool {
     let mut m_prime = [0u8; 256];
     m_prime[0] = 0x00;
     m_prime[1] = 0x00;
     let len = 2 + MESSAGE.len();
-    m_prime[2..len].copy_from_slice(MESSAGE);
-    let sig = krabipqc::ml_dsa_87::sign_internal(&SK_87, &m_prime[..len], &RND).unwrap();
-    krabipqc::ml_dsa_87::verify_internal(&PK_87, &m_prime[..len], &sig)
+    let Some(slot) = m_prime.get_mut(2..len) else {
+        return false;
+    };
+    slot.copy_from_slice(MESSAGE);
+    let Some(slice) = m_prime.get(..len) else {
+        return false;
+    };
+    krabipqc::ml_dsa_87::sign_internal(&SK_87, slice, &RND).is_ok()
 }
 
 #[entry]
 fn main() -> ! {
-    test_fixture(sign_and_verify, "ml_dsa_87_sign", "modmath");
+    test_fixture(sign, "ml_dsa_87_sign", "modmath");
     loop {}
 }
 
