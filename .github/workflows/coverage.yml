@@ -8,6 +8,11 @@ on:
 
 permissions:
   contents: read
+  # Coveralls action posts a commit status (and optionally a check run)
+  # back to the PR head — without these scopes the upload succeeds but
+  # the `coverage/coveralls` status never appears on GitHub.
+  statuses: write
+  checks: write
 
 jobs:
   coverage:
