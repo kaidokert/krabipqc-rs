@@ -174,8 +174,8 @@ macro_rules! impl_mlkem_kem {
                 &self,
                 ct: &Array<u8, sizes::$ct_size>,
             ) -> Result<Array<u8, U32>, Self::Error> {
-                let sk_arr: &[u8; crate::$facade::DK_BYTES] = (&*self.sk).into();
-                let ct_arr: &[u8; crate::$facade::CT_BYTES] = ct.into();
+                let sk_arr: &[u8; crate::$facade::DK_BYTES] = (&*self.sk).as_ref();
+                let ct_arr: &[u8; crate::$facade::CT_BYTES] = ct.as_ref();
                 let ss = crate::$facade::decaps_internal(sk_arr, ct_arr)?;
                 Ok(Array::from(ss))
             }
@@ -191,7 +191,7 @@ macro_rules! impl_mlkem_kem {
             where
                 R: CryptoRng + ?Sized,
             {
-                let ek_arr: &[u8; crate::$facade::EK_BYTES] = (&self.ek).into();
+                let ek_arr: &[u8; crate::$facade::EK_BYTES] = self.ek.as_ref();
                 let mut m = Zeroizing::new([0u8; 32]);
                 rand_core::Rng::fill_bytes(rng, &mut *m);
                 // TODO: drop .expect — needs const-generic Params buffer sizes + CanonicalEk typestate.
@@ -282,8 +282,8 @@ macro_rules! impl_mldsa_sig {
 
         impl Verifier<$sig> for $verifier {
             fn verify(&self, msg: &[u8], signature: &$sig) -> Result<(), SigError> {
-                let pk_arr: &[u8; crate::$facade::PK_BYTES] = (&self.pk).into();
-                let sig_arr: &[u8; crate::$facade::SIG_BYTES] = (&signature.0).into();
+                let pk_arr: &[u8; crate::$facade::PK_BYTES] = self.pk.as_ref();
+                let sig_arr: &[u8; crate::$facade::SIG_BYTES] = signature.0.as_ref();
                 if crate::$facade::verify(pk_arr, msg, &[], sig_arr) {
                     Ok(())
                 } else {
@@ -336,7 +336,7 @@ macro_rules! impl_mldsa_sig {
 
         impl Signer<$sig> for $signer {
             fn try_sign(&self, msg: &[u8]) -> Result<$sig, SigError> {
-                let sk_arr: &[u8; crate::$facade::SK_BYTES] = (&*self.sk).into();
+                let sk_arr: &[u8; crate::$facade::SK_BYTES] = (&*self.sk).as_ref();
                 let rnd = [0u8; 32]; // deterministic; ctx = empty
                 let bytes =
                     crate::$facade::sign(sk_arr, msg, &[], &rnd).map_err(|_| SigError::new())?;
@@ -350,7 +350,7 @@ macro_rules! impl_mldsa_sig {
                 rng: &mut R,
                 msg: &[u8],
             ) -> Result<$sig, SigError> {
-                let sk_arr: &[u8; crate::$facade::SK_BYTES] = (&*self.sk).into();
+                let sk_arr: &[u8; crate::$facade::SK_BYTES] = (&*self.sk).as_ref();
                 let bytes = crate::$facade::sign_random(sk_arr, msg, &[], rng)
                     .map_err(|_| SigError::new())?;
                 Ok($sig(Array::from(bytes)))
