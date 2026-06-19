@@ -111,16 +111,24 @@ macro_rules! impl_mlkem_kem {
             type KeySize = sizes::$dk_size;
         }
 
-        impl KeyInit for $dk_struct {
-            fn new(key: &Array<u8, sizes::$dk_size>) -> Self {
+        // Symmetric with `Ek*::TryKeyInit`: peer-supplied dk bytes embed
+        // an ek that must satisfy the FIPS 203 §7.2 modulus check, else
+        // `Dk::encapsulation_key()` would silently hand out a
+        // non-canonical Ek that the corresponding `Ek::new` would reject.
+        // No infallible `KeyInit` for the same reason — drops the auto
+        // `kem::FromSeed` blanket; deterministic-seed construction goes
+        // through `try_generate_from_rng` or the facade keygen instead.
+        impl TryKeyInit for $dk_struct {
+            fn new(key: &Array<u8, sizes::$dk_size>) -> Result<Self, kem::InvalidKey> {
                 let mut ek_bytes = Array::<u8, sizes::$ek_size>::default();
                 let ek_start = Self::DK_PKE_LEN;
                 let ek_end = ek_start + Self::EK_LEN;
                 ek_bytes.copy_from_slice(&key[ek_start..ek_end]);
-                Self {
+                let ek = <$ek_struct as TryKeyInit>::new(&ek_bytes)?;
+                Ok(Self {
                     sk: Zeroizing::new(key.clone()),
-                    ek: $ek_struct { ek: ek_bytes },
-                }
+                    ek,
+                })
             }
         }
 
@@ -483,5 +491,21 @@ mod tests {
         bytes[0] = 0xFF;
         bytes[1] = (bytes[1] & 0xF0) | 0x0F;
         assert!(<Ek512 as TryKeyInit>::new(&bytes).is_err());
+    }
+
+    /// Symmetric with the Ek test: a Dk byte blob with a non-canonical
+    /// embedded ek must be rejected at TryKeyInit; otherwise Dk's
+    /// `encapsulation_key()` would silently surface an invalid Ek.
+    #[test]
+    fn mlkem512_trykeyinit_dk_rejects_non_canonical_embedded_ek() {
+        let mut rng = FixedRng(0x42);
+        let dk_good = Dk512::try_generate_from_rng(&mut rng).unwrap();
+        let mut bytes: Array<u8, sizes::U1632> = *dk_good.sk;
+        // ek_pke starts at offset 384 * K = 768; first 12-bit coeff
+        // sits at bytes 768..770.
+        let ek_off = Dk512::DK_PKE_LEN;
+        bytes[ek_off] = 0xFF;
+        bytes[ek_off + 1] = (bytes[ek_off + 1] & 0xF0) | 0x0F;
+        assert!(<Dk512 as TryKeyInit>::new(&bytes).is_err());
     }
 }
