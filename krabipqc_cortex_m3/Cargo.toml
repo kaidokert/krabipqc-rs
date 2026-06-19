@@ -1,0 +1,44 @@
+[package]
+name = "krabipqc_cortex_m3"
+version = "0.1.0"
+edition = "2024"
+autobins = false
+autotests = false
+autobenches = false
+
+[features]
+# Switches verify examples to a stub that just touches the inputs so
+# the harness measurement reflects only fixture overhead.
+baseline = []
+
+# This crate is a thumbv7m-only no_std binary harness; the standard
+# `cargo test` workflow doesn't apply.
+[lib]
+test = false
+
+[[example]]
+name = "ml_dsa_44_verify"
+test = false
+bench = false
+
+[[example]]
+name = "sanity"
+test = false
+bench = false
+
+[dependencies]
+cortex-m = "0.7"
+cortex-m-rt = "0.7"
+cortex-m-semihosting = "0.5"
+panic-semihosting = { version = "0.6", features = ["exit"] }
+krabipqc = { path = "../krabipqc" }
+modmath = { version = "0.3.1", default-features = false, features = ["wide-mul"] }
+
+[profile.release]
+codegen-units = 1
+debug = true
+lto = true
+opt-level = "z"
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(thumbv7m)'] }

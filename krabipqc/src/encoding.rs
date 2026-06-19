@@ -30,6 +30,17 @@ pub enum EncodeError {
     NotCanonical,
 }
 
+impl core::fmt::Display for EncodeError {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            EncodeError::BufferTooSmall => f.write_str("buffer too small"),
+            EncodeError::NotCanonical => f.write_str("non-canonical encoding"),
+        }
+    }
+}
+
+impl core::error::Error for EncodeError {}
+
 /// `ceil(log2(a+1))` — minimum unsigned bit count for representing `a`.
 #[inline]
 pub(crate) const fn bitlen(mut a: u32) -> usize {

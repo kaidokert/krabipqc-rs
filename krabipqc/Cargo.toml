@@ -28,6 +28,20 @@ zeroize = { version = "1", default-features = false }
 
 rand_core = { version = "0.10", default-features = false }
 
+# RustCrypto trait crates (kem::Kem / signature::{Signer, Verifier, ...}).
+# Unconditional: interop with the broader RustCrypto ecosystem is the
+# default expectation for a public-release PQC crate. Adds ~252 bytes
+# of .text on cortex-m3 after DCE.
+kem = "0.3"
+signature = { version = "3", default-features = false, features = ["rand_core"] }
+# Direct dep with `zeroize` feature so the `Array<u8, N>` storage in
+# the trait wrappers gets `Zeroize` — kem's `crypto-common` alias
+# doesn't forward a zeroize feature, so we pin it ourselves. The
+# `extra-sizes` feature unlocks the U800 / U1184 / U1568 / U1632 /
+# U2400 / U2420 / U3168 / U3309 / U4032 / U4627 / U4896 sizes used by
+# the per-set parameter sets.
+hybrid-array = { version = "0.4", features = ["zeroize", "extra-sizes"] }
+
 [dev-dependencies]
 hex = { version = "0.4", default-features = false, features = ["alloc"] }
 serde_json = { version = "1", default-features = false, features = ["alloc"] }
