@@ -21,11 +21,17 @@ fn main() {
     print_arr("XI", &XI);
     println!("// rnd (sign randomness, all zeros for determinism):");
     print_arr("RND", &RND);
+    // Emit MESSAGE as a `&[u8]` byte-array literal so the generator
+    // stays correct even for non-UTF-8 / quote-containing bytes, and
+    // the resulting `&[u8]` type matches the downstream consumer's
+    // `copy_from_slice(MESSAGE)` / `MESSAGE.len()` call sites.
     println!("// raw message (M' = 0x00 || 0x00 || MESSAGE):");
-    println!(
-        "pub const MESSAGE: &[u8] = b\"{}\";",
-        core::str::from_utf8(MESSAGE).unwrap()
-    );
+    println!("pub const MESSAGE: &[u8] = &[");
+    for chunk in MESSAGE.chunks(12) {
+        let s: Vec<_> = chunk.iter().map(|b| format!("0x{:02x}", b)).collect();
+        println!("    {},", s.join(", "));
+    }
+    println!("];");
     println!("// pk:");
     print_arr("PK", &pk);
     println!("// sk:");

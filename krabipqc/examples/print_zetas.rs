@@ -64,7 +64,12 @@ fn main() {
         to_mont(pr::exp::<u32>(DSA_ZETA, bitrev8(i as u32), DSA_Q), DSA_Q)
     });
     print_arr("ZETAS_MONT", &dsa_zetas_mont, 8);
-    println!("pub const N_INV_MONT: u32 = {};", to_mont(DSA_N_INV, DSA_Q));
+    // Inverse-NTT tail multiplies Mont-form coefficients by the
+    // CANONICAL N_INV through `mul_mont` (see src/ntt.rs), which
+    // folds the scalar multiply and the Mont strip into one REDC.
+    // Emit the canonical constant verbatim — a Mont-form value here
+    // would introduce an extra factor of R when refreshed.
+    println!("pub const N_INV: u32 = {};", DSA_N_INV);
 
     println!();
     // ML-KEM ZETAS[i] = ZETA^BitRev_7(i) mod Q, i in 0..128.
@@ -84,8 +89,7 @@ fn main() {
         )
     });
     print_arr("GAMMAS_MONT", &kem_gammas_mont, 8);
-    println!(
-        "pub const N_INV_128_MONT: u32 = {}; // 128^-1 * R mod 3329",
-        to_mont(KEM_N_INV_128, KEM_Q)
-    );
+    // Same reason as N_INV above — `mul_mont(N_INV_128_canon, c_mont)`
+    // is what the ML-KEM inverse NTT does, so emit canonical.
+    println!("pub const N_INV_128: u32 = {};", KEM_N_INV_128);
 }
