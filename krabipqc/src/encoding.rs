@@ -165,6 +165,62 @@ pub fn sig_z_row<const K: usize, const L: usize>(
     bit_unpack(slice, params.gamma1, z_bits)
 }
 
+/// `i`-th `s1` / `s2` / `t0` row decoded straight from `sk`, without
+/// materializing the sibling rows. The sign path decodes each row
+/// into its NTT slot one at a time, so the whole-sk `DecodedSk` tuple
+/// (built in `sk_decode`'s frame, then copied into the caller's) never
+/// materializes a second copy on the stack.
+fn sk_s_chunk<const K: usize, const L: usize>(params: &Params<K, L>) -> usize {
+    32 * bitlen(2 * params.eta.value())
+}
+
+fn sk_t0_chunk() -> usize {
+    let t0_a = (1u32 << (D - 1)) - 1;
+    let t0_b = 1u32 << (D - 1);
+    32 * bitlen(t0_a + t0_b)
+}
+
+pub fn sk_s1_row<const K: usize, const L: usize>(
+    params: &Params<K, L>,
+    sk: &[u8],
+    i: usize,
+) -> Result<Poly<u32>, EncodeError> {
+    let s_chunk = sk_s_chunk(params);
+    let off = 128 + i * s_chunk;
+    let src = sk
+        .get(off..off + s_chunk)
+        .ok_or(EncodeError::BufferTooSmall)?;
+    bit_unpack(src, params.eta.value(), bitlen(2 * params.eta.value()))
+}
+
+pub fn sk_s2_row<const K: usize, const L: usize>(
+    params: &Params<K, L>,
+    sk: &[u8],
+    i: usize,
+) -> Result<Poly<u32>, EncodeError> {
+    let s_chunk = sk_s_chunk(params);
+    let off = 128 + (L + i) * s_chunk;
+    let src = sk
+        .get(off..off + s_chunk)
+        .ok_or(EncodeError::BufferTooSmall)?;
+    bit_unpack(src, params.eta.value(), bitlen(2 * params.eta.value()))
+}
+
+pub fn sk_t0_row<const K: usize, const L: usize>(
+    params: &Params<K, L>,
+    sk: &[u8],
+    i: usize,
+) -> Result<Poly<u32>, EncodeError> {
+    let s_chunk = sk_s_chunk(params);
+    let t0_chunk = sk_t0_chunk();
+    let off = 128 + (L + K) * s_chunk + i * t0_chunk;
+    let src = sk
+        .get(off..off + t0_chunk)
+        .ok_or(EncodeError::BufferTooSmall)?;
+    let t0_b = 1u32 << (D - 1);
+    bit_unpack(src, t0_b, bitlen(((1u32 << (D - 1)) - 1) + t0_b))
+}
+
 /// Subslice of `sig` covering the encoded hint, suitable for
 /// [`h_row_positions`] / [`h_weight`] / [`validate_hint_bytes`].
 pub fn sig_hint_slice<'a, const K: usize, const L: usize>(
@@ -233,7 +289,10 @@ pub fn validate_hint_bytes<const K: usize>(hint: &[u8], omega: usize) -> bool {
     true
 }
 
-/// Decoded secret-key components produced by [`sk_decode`].
+/// Decoded secret-key components produced by [`sk_decode`]. The sign
+/// path decodes rows individually via `sk_s1_row` / `sk_s2_row` /
+/// `sk_t0_row`, so the whole-sk decode is exercised only by tests.
+#[allow(dead_code)]
 pub type DecodedSk<const K: usize, const L: usize> = (
     [u8; 32],
     [u8; 32],
@@ -320,6 +379,7 @@ pub fn sk_encode<const K: usize, const L: usize>(
 }
 
 /// skDecode (FIPS 204 Alg 25).
+#[allow(dead_code)]
 pub fn sk_decode<const K: usize, const L: usize>(
     params: &Params<K, L>,
     sk: &[u8],
