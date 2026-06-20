@@ -1,0 +1,77 @@
+[package]
+name = "krabipqc_riscv32"
+version = "0.1.0"
+edition = "2024"
+autobins = false
+autotests = false
+autobenches = false
+
+[features]
+# Switches verify examples to a stub that just touches the inputs so
+# the harness measurement reflects only fixture overhead.
+baseline = []
+
+# Pass-through to krabipqc's lowmem sign trade so the sign stack
+# examples can be measured in both modes.
+lowmem = ["krabipqc/lowmem"]
+
+# This crate is a riscv32-only no_std binary harness; the standard
+# `cargo test` workflow doesn't apply.
+[lib]
+test = false
+
+[[example]]
+name = "ml_dsa_44_verify_stack"
+test = false
+bench = false
+
+[[example]]
+name = "ml_dsa_44_sign_stack"
+test = false
+bench = false
+
+[[example]]
+name = "ml_dsa_65_verify_stack"
+test = false
+bench = false
+
+[[example]]
+name = "ml_dsa_65_sign_stack"
+test = false
+bench = false
+
+[[example]]
+name = "ml_dsa_87_verify_stack"
+test = false
+bench = false
+
+[[example]]
+name = "ml_dsa_87_sign_stack"
+test = false
+bench = false
+
+[[example]]
+name = "ml_kem_512_decaps_stack"
+test = false
+bench = false
+
+[[example]]
+name = "ml_kem_768_decaps_stack"
+test = false
+bench = false
+
+[[example]]
+name = "ml_kem_1024_decaps_stack"
+test = false
+bench = false
+
+[dependencies]
+riscv-rt = "0.13"
+krabipqc = { path = "../krabipqc" }
+modmath = { version = "0.3.1", default-features = false, features = ["wide-mul"] }
+
+[profile.release]
+codegen-units = 1
+debug = true
+lto = true
+opt-level = "z"
