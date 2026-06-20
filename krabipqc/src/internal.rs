@@ -143,22 +143,35 @@ where
     // across the kappa loop stay in Mont domain. Everything
     // secret-derived is zeroize-on-drop; `rho` is public.
     let (rho, big_k, tr, mut s1_hat, mut s2_hat, mut t0_hat) = {
-        let (rho, big_k, tr, mut s1, mut s2, mut t0) = encoding::sk_decode(params, sk)?;
+        let mut rho = [0u8; 32];
+        let mut big_k = Zeroizing::new([0u8; 32]);
+        let mut tr = Zeroizing::new([0u8; 64]);
+        rho.copy_from_slice(sk.get(..32).ok_or(encoding::EncodeError::BufferTooSmall)?);
+        big_k.copy_from_slice(
+            sk.get(32..64)
+                .ok_or(encoding::EncodeError::BufferTooSmall)?,
+        );
+        tr.copy_from_slice(
+            sk.get(64..128)
+                .ok_or(encoding::EncodeError::BufferTooSmall)?,
+        );
+        // Decode the secrets straight into these NTT slots. Going
+        // through the whole-sk `DecodedSk` tuple instead would build
+        // s1/s2/t0 in `sk_decode`'s frame and then copy the tuple into
+        // this one — both live at the return, spiking the high-water
+        // mark above the kappa loop's own peak.
+        let mut s1_hat: Zeroizing<PolyVec<u32, L>> = Zeroizing::new(PolyVec::zero());
+        let mut s2_hat: Zeroizing<PolyVec<u32, K>> = Zeroizing::new(PolyVec::zero());
+        let mut t0_hat: Zeroizing<PolyVec<u32, K>> = Zeroizing::new(PolyVec::zero());
+        encoding::decode_sk_secrets(params, sk, &mut s1_hat, &mut s2_hat, &mut t0_hat)?;
         for i in 0..L {
-            ntt::ntt::<P>(&mut s1.v[i]);
+            ntt::ntt::<P>(&mut s1_hat.v[i]);
         }
         for i in 0..K {
-            ntt::ntt::<P>(&mut s2.v[i]);
-            ntt::ntt::<P>(&mut t0.v[i]);
+            ntt::ntt::<P>(&mut s2_hat.v[i]);
+            ntt::ntt::<P>(&mut t0_hat.v[i]);
         }
-        (
-            rho,
-            Zeroizing::new(big_k),
-            Zeroizing::new(tr),
-            Zeroizing::new(s1),
-            Zeroizing::new(s2),
-            Zeroizing::new(t0),
-        )
+        (rho, big_k, tr, s1_hat, s2_hat, t0_hat)
     };
 
     let a_hat = expand_a::<K, L>(&rho);

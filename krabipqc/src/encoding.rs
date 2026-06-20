@@ -165,6 +165,68 @@ pub fn sig_z_row<const K: usize, const L: usize>(
     bit_unpack(slice, params.gamma1, z_bits)
 }
 
+/// `(b, bits)` for the `s1` / `s2` BitPack range (centered `[-eta, eta]`).
+fn sk_s_packing<const K: usize, const L: usize>(params: &Params<K, L>) -> (u32, usize) {
+    let eta = params.eta.value();
+    (eta, bitlen(eta.saturating_mul(2)))
+}
+
+/// `(b, bits)` for the `t0` BitPack range. `D` is a compile-time
+/// constant, so these fold and can't overflow at runtime.
+fn sk_t0_packing() -> (u32, usize) {
+    let t0_b = 1u32 << (D - 1);
+    let t0_a = t0_b - 1;
+    (t0_b, bitlen(t0_a + t0_b))
+}
+
+/// Decode `s1` / `s2` / `t0` from `sk` straight into the caller's NTT
+/// slots, in canonical (pre-NTT) form. Bypasses the whole-sk
+/// `DecodedSk` tuple — which would stage a second copy of the secrets
+/// on the stack — and walks the key body one row at a time with
+/// [`<[u8]>::split_at_checked`] rather than computing absolute byte
+/// offsets. There is therefore no `i * chunk` / `off + chunk`
+/// arithmetic to overflow: every step advances the cursor by one
+/// chunk (sizes are `saturating_mul` so a degenerate parameter set
+/// caps out instead of wrapping) and a short key surfaces as
+/// `BufferTooSmall` instead of panicking.
+pub(crate) fn decode_sk_secrets<const K: usize, const L: usize>(
+    params: &Params<K, L>,
+    sk: &[u8],
+    s1: &mut PolyVec<u32, L>,
+    s2: &mut PolyVec<u32, K>,
+    t0: &mut PolyVec<u32, K>,
+) -> Result<(), EncodeError> {
+    let (eta, eta_bits) = sk_s_packing(params);
+    let s_chunk = eta_bits.saturating_mul(32);
+    let (t0_b, t0_bits) = sk_t0_packing();
+    let t0_chunk = t0_bits.saturating_mul(32);
+
+    // Skip the rho / K / tr header; the caller lifts those out itself.
+    let mut cur = sk.get(128..).ok_or(EncodeError::BufferTooSmall)?;
+    for poly in s1.v.iter_mut() {
+        let (row, rest) = cur
+            .split_at_checked(s_chunk)
+            .ok_or(EncodeError::BufferTooSmall)?;
+        *poly = bit_unpack(row, eta, eta_bits)?;
+        cur = rest;
+    }
+    for poly in s2.v.iter_mut() {
+        let (row, rest) = cur
+            .split_at_checked(s_chunk)
+            .ok_or(EncodeError::BufferTooSmall)?;
+        *poly = bit_unpack(row, eta, eta_bits)?;
+        cur = rest;
+    }
+    for poly in t0.v.iter_mut() {
+        let (row, rest) = cur
+            .split_at_checked(t0_chunk)
+            .ok_or(EncodeError::BufferTooSmall)?;
+        *poly = bit_unpack(row, t0_b, t0_bits)?;
+        cur = rest;
+    }
+    Ok(())
+}
+
 /// Subslice of `sig` covering the encoded hint, suitable for
 /// [`h_row_positions`] / [`h_weight`] / [`validate_hint_bytes`].
 pub fn sig_hint_slice<'a, const K: usize, const L: usize>(
@@ -233,7 +295,11 @@ pub fn validate_hint_bytes<const K: usize>(hint: &[u8], omega: usize) -> bool {
     true
 }
 
-/// Decoded secret-key components produced by [`sk_decode`].
+/// Decoded secret-key components produced by [`sk_decode`]. The sign
+/// path decodes rows individually via `sk_s1_row` / `sk_s2_row` /
+/// `sk_t0_row`, so the whole-sk decode is exercised only by the
+/// round-trip tests — hence `#[cfg(test)]`.
+#[cfg(test)]
 pub type DecodedSk<const K: usize, const L: usize> = (
     [u8; 32],
     [u8; 32],
@@ -319,7 +385,10 @@ pub fn sk_encode<const K: usize, const L: usize>(
     Ok(())
 }
 
-/// skDecode (FIPS 204 Alg 25).
+/// skDecode (FIPS 204 Alg 25). Inverse of [`sk_encode`]; the sign path
+/// streams rows via the `sk_*_row` accessors, so this whole-sk form is
+/// kept for the encode/decode round-trip tests.
+#[cfg(test)]
 pub fn sk_decode<const K: usize, const L: usize>(
     params: &Params<K, L>,
     sk: &[u8],
