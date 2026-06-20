@@ -165,85 +165,66 @@ pub fn sig_z_row<const K: usize, const L: usize>(
     bit_unpack(slice, params.gamma1, z_bits)
 }
 
-/// Per-row secret-key decoders used by the sign path: each decodes one
-/// `s1` / `s2` / `t0` polynomial straight from the `sk` byte slice
-/// without materializing the sibling rows, so the whole-sk `DecodedSk`
-/// tuple (built in `sk_decode`'s frame, then copied into the caller's)
-/// never materializes a second copy on the stack. The row index is
-/// bounds-checked against `L` / `K`, and every slice into `sk` goes
-/// through `.get()` so a malformed or out-of-range request returns
-/// `BufferTooSmall` rather than panicking.
-fn sk_s_eta<const K: usize, const L: usize>(params: &Params<K, L>) -> (u32, usize) {
+/// `(b, bits)` for the `s1` / `s2` BitPack range (centered `[-eta, eta]`).
+fn sk_s_packing<const K: usize, const L: usize>(params: &Params<K, L>) -> (u32, usize) {
     let eta = params.eta.value();
-    (eta, bitlen(2 * eta))
+    (eta, bitlen(eta.saturating_mul(2)))
 }
 
-fn sk_s_chunk<const K: usize, const L: usize>(params: &Params<K, L>) -> usize {
-    32 * sk_s_eta(params).1
-}
-
-/// `(b, bits)` for the `t0` BitPack range — single source of truth so
-/// `sk_t0_chunk` and `sk_t0_row` can't drift if `D` changes.
+/// `(b, bits)` for the `t0` BitPack range. `D` is a compile-time
+/// constant, so these fold and can't overflow at runtime.
 fn sk_t0_packing() -> (u32, usize) {
     let t0_b = 1u32 << (D - 1);
     let t0_a = t0_b - 1;
     (t0_b, bitlen(t0_a + t0_b))
 }
 
-fn sk_t0_chunk() -> usize {
-    32 * sk_t0_packing().1
-}
-
-/// Decode one `eta`-range secret row at byte offset `off` in `sk`.
-fn decode_s_row<const K: usize, const L: usize>(
+/// Decode `s1` / `s2` / `t0` from `sk` straight into the caller's NTT
+/// slots, in canonical (pre-NTT) form. Bypasses the whole-sk
+/// `DecodedSk` tuple — which would stage a second copy of the secrets
+/// on the stack — and walks the key body one row at a time with
+/// [`<[u8]>::split_at_checked`] rather than computing absolute byte
+/// offsets. There is therefore no `i * chunk` / `off + chunk`
+/// arithmetic to overflow: every step advances the cursor by one
+/// chunk (sizes are `saturating_mul` so a degenerate parameter set
+/// caps out instead of wrapping) and a short key surfaces as
+/// `BufferTooSmall` instead of panicking.
+pub(crate) fn decode_sk_secrets<const K: usize, const L: usize>(
     params: &Params<K, L>,
     sk: &[u8],
-    off: usize,
-) -> Result<Poly<u32>, EncodeError> {
-    let (eta, eta_bits) = sk_s_eta(params);
-    let src = sk
-        .get(off..off + sk_s_chunk(params))
-        .ok_or(EncodeError::BufferTooSmall)?;
-    bit_unpack(src, eta, eta_bits)
-}
-
-pub fn sk_s1_row<const K: usize, const L: usize>(
-    params: &Params<K, L>,
-    sk: &[u8],
-    i: usize,
-) -> Result<Poly<u32>, EncodeError> {
-    if i >= L {
-        return Err(EncodeError::BufferTooSmall);
-    }
-    decode_s_row(params, sk, 128 + i * sk_s_chunk(params))
-}
-
-pub fn sk_s2_row<const K: usize, const L: usize>(
-    params: &Params<K, L>,
-    sk: &[u8],
-    i: usize,
-) -> Result<Poly<u32>, EncodeError> {
-    if i >= K {
-        return Err(EncodeError::BufferTooSmall);
-    }
-    decode_s_row(params, sk, 128 + (L + i) * sk_s_chunk(params))
-}
-
-pub fn sk_t0_row<const K: usize, const L: usize>(
-    params: &Params<K, L>,
-    sk: &[u8],
-    i: usize,
-) -> Result<Poly<u32>, EncodeError> {
-    if i >= K {
-        return Err(EncodeError::BufferTooSmall);
-    }
-    let t0_chunk = sk_t0_chunk();
-    let off = 128 + (L + K) * sk_s_chunk(params) + i * t0_chunk;
-    let src = sk
-        .get(off..off + t0_chunk)
-        .ok_or(EncodeError::BufferTooSmall)?;
+    s1: &mut PolyVec<u32, L>,
+    s2: &mut PolyVec<u32, K>,
+    t0: &mut PolyVec<u32, K>,
+) -> Result<(), EncodeError> {
+    let (eta, eta_bits) = sk_s_packing(params);
+    let s_chunk = eta_bits.saturating_mul(32);
     let (t0_b, t0_bits) = sk_t0_packing();
-    bit_unpack(src, t0_b, t0_bits)
+    let t0_chunk = t0_bits.saturating_mul(32);
+
+    // Skip the rho / K / tr header; the caller lifts those out itself.
+    let mut cur = sk.get(128..).ok_or(EncodeError::BufferTooSmall)?;
+    for poly in s1.v.iter_mut() {
+        let (row, rest) = cur
+            .split_at_checked(s_chunk)
+            .ok_or(EncodeError::BufferTooSmall)?;
+        *poly = bit_unpack(row, eta, eta_bits)?;
+        cur = rest;
+    }
+    for poly in s2.v.iter_mut() {
+        let (row, rest) = cur
+            .split_at_checked(s_chunk)
+            .ok_or(EncodeError::BufferTooSmall)?;
+        *poly = bit_unpack(row, eta, eta_bits)?;
+        cur = rest;
+    }
+    for poly in t0.v.iter_mut() {
+        let (row, rest) = cur
+            .split_at_checked(t0_chunk)
+            .ok_or(EncodeError::BufferTooSmall)?;
+        *poly = bit_unpack(row, t0_b, t0_bits)?;
+        cur = rest;
+    }
+    Ok(())
 }
 
 /// Subslice of `sig` covering the encoded hint, suitable for

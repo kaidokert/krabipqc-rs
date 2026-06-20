@@ -155,7 +155,7 @@ where
             sk.get(64..128)
                 .ok_or(encoding::EncodeError::BufferTooSmall)?,
         );
-        // Decode each secret row straight into its NTT slot. Going
+        // Decode the secrets straight into these NTT slots. Going
         // through the whole-sk `DecodedSk` tuple instead would build
         // s1/s2/t0 in `sk_decode`'s frame and then copy the tuple into
         // this one — both live at the return, spiking the high-water
@@ -163,14 +163,12 @@ where
         let mut s1_hat: Zeroizing<PolyVec<u32, L>> = Zeroizing::new(PolyVec::zero());
         let mut s2_hat: Zeroizing<PolyVec<u32, K>> = Zeroizing::new(PolyVec::zero());
         let mut t0_hat: Zeroizing<PolyVec<u32, K>> = Zeroizing::new(PolyVec::zero());
+        encoding::decode_sk_secrets(params, sk, &mut s1_hat, &mut s2_hat, &mut t0_hat)?;
         for i in 0..L {
-            s1_hat.v[i] = encoding::sk_s1_row(params, sk, i)?;
             ntt::ntt::<P>(&mut s1_hat.v[i]);
         }
         for i in 0..K {
-            s2_hat.v[i] = encoding::sk_s2_row(params, sk, i)?;
             ntt::ntt::<P>(&mut s2_hat.v[i]);
-            t0_hat.v[i] = encoding::sk_t0_row(params, sk, i)?;
             ntt::ntt::<P>(&mut t0_hat.v[i]);
         }
         (rho, big_k, tr, s1_hat, s2_hat, t0_hat)
