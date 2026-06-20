@@ -65,9 +65,16 @@ pub(crate) fn check_stack_high_water_mark_inner<const SAFE: usize>() -> usize {
         let bss_end = core::ptr::addr_of!(__ebss) as usize;
         let safe_stack_end = bss_end.saturating_add(SAFE);
 
+        if safe_stack_end >= stack_start {
+            // Paint floor is at or above stack top — layout is malformed.
+            // Return the full range as a conservative estimate so the
+            // harness reports maximum possible usage rather than zero.
+            return stack_start.saturating_sub(bss_end);
+        }
+
         // read_volatile so the scan isn't constant-folded or moved
         // above the paint/run window by an aggressive optimizer.
-        let mut current = safe_stack_end.min(stack_start);
+        let mut current = safe_stack_end;
         while current < stack_start && core::ptr::read_volatile(current as *const u8) == 0xAA {
             current += 1;
         }
