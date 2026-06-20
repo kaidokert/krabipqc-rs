@@ -233,6 +233,92 @@ macro_rules! per_set {
                     SignError::Rng(never) => match never {},
                 }
             }
+
+            #[cfg(test)]
+            mod tests {
+                use super::*;
+                use core::convert::Infallible;
+
+                struct FixedRng(u8);
+                impl rand_core::TryRng for FixedRng {
+                    type Error = Infallible;
+                    fn try_next_u32(&mut self) -> Result<u32, Self::Error> {
+                        Ok(u32::from_le_bytes([self.0; 4]))
+                    }
+                    fn try_next_u64(&mut self) -> Result<u64, Self::Error> {
+                        Ok(u64::from_le_bytes([self.0; 8]))
+                    }
+                    fn try_fill_bytes(&mut self, dst: &mut [u8]) -> Result<(), Self::Error> {
+                        dst.fill(self.0);
+                        Ok(())
+                    }
+                }
+                impl rand_core::TryCryptoRng for FixedRng {}
+
+                #[test]
+                fn keygen_via_rng() {
+                    keygen(&mut FixedRng(0x42)).unwrap();
+                }
+
+                #[test]
+                fn hash_sign_verify_sha256() {
+                    let (pk, sk) = keygen_internal(&[0x42u8; 32]).unwrap();
+                    let ph = PreHash::Sha256([0x11u8; 32]);
+                    let sig = hash_sign(&sk, &ph, b"ctx", &[0xC3u8; 32]).unwrap();
+                    assert!(hash_verify(&pk, &ph, b"ctx", &sig));
+                    let ph_wrong = PreHash::Sha256([0x22u8; 32]);
+                    assert!(!hash_verify(&pk, &ph_wrong, b"ctx", &sig));
+                }
+
+                #[test]
+                fn hash_sign_verify_sha512() {
+                    let (pk, sk) = keygen_internal(&[0x55u8; 32]).unwrap();
+                    let ph = PreHash::Sha512([0x77u8; 64]);
+                    let sig = hash_sign(&sk, &ph, b"", &[0xC3u8; 32]).unwrap();
+                    assert!(hash_verify(&pk, &ph, b"", &sig));
+                }
+
+                #[test]
+                fn sign_random_roundtrip() {
+                    let (pk, sk) = keygen_internal(&[0x42u8; 32]).unwrap();
+                    let sig = sign_random(&sk, b"msg", b"", &mut FixedRng(0x77)).unwrap();
+                    assert!(verify(&pk, b"msg", b"", &sig));
+                }
+
+                #[test]
+                fn hash_sign_random_roundtrip() {
+                    let (pk, sk) = keygen_internal(&[0x42u8; 32]).unwrap();
+                    let ph = PreHash::Sha256([0xABu8; 32]);
+                    let sig = hash_sign_random(&sk, &ph, b"", &mut FixedRng(0x77)).unwrap();
+                    assert!(hash_verify(&pk, &ph, b"", &sig));
+                }
+
+                #[test]
+                fn ctx_too_long_rejected() {
+                    let (pk, sk) = keygen_internal(&[0x42u8; 32]).unwrap();
+                    let long = [0u8; 256];
+                    let ph = PreHash::Sha256([0u8; 32]);
+                    let rnd = [0u8; 32];
+                    assert!(matches!(
+                        sign(&sk, b"m", &long, &rnd),
+                        Err(SignError::CtxTooLong)
+                    ));
+                    assert!(!verify(&pk, b"m", &long, &[0u8; SIG_BYTES]));
+                    assert!(matches!(
+                        hash_sign(&sk, &ph, &long, &rnd),
+                        Err(SignError::CtxTooLong)
+                    ));
+                    assert!(!hash_verify(&pk, &ph, &long, &[0u8; SIG_BYTES]));
+                    assert!(matches!(
+                        sign_random(&sk, b"m", &long, &mut FixedRng(0x42)),
+                        Err(SignError::CtxTooLong)
+                    ));
+                    assert!(matches!(
+                        hash_sign_random(&sk, &ph, &long, &mut FixedRng(0x42)),
+                        Err(SignError::CtxTooLong)
+                    ));
+                }
+            }
         }
     };
 }

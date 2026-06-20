@@ -171,4 +171,24 @@ mod tests {
             assert_eq!(a.coeffs[i], 0);
         }
     }
+
+    #[test]
+    fn default_yields_zero() {
+        let p: Poly<u32> = Poly::default();
+        assert!(p.coeffs.iter().all(|&c| c == 0));
+    }
+
+    #[test]
+    fn elementwise_mul_pointwise() {
+        let mut a = Poly::<u32>::zero();
+        let mut b = Poly::<u32>::zero();
+        for i in 0..N {
+            a.coeffs[i] = (i as u32 + 1) % Q;
+            b.coeffs[i] = 2;
+        }
+        let c = a.elementwise_mul(&b, Q);
+        for i in 0..N {
+            assert_eq!(c.coeffs[i], (a.coeffs[i] * 2) % Q);
+        }
+    }
 }
