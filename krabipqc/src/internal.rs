@@ -146,9 +146,15 @@ where
         let mut rho = [0u8; 32];
         let mut big_k = Zeroizing::new([0u8; 32]);
         let mut tr = Zeroizing::new([0u8; 64]);
-        rho.copy_from_slice(&sk[..32]);
-        big_k.copy_from_slice(&sk[32..64]);
-        tr.copy_from_slice(&sk[64..128]);
+        rho.copy_from_slice(sk.get(..32).ok_or(encoding::EncodeError::BufferTooSmall)?);
+        big_k.copy_from_slice(
+            sk.get(32..64)
+                .ok_or(encoding::EncodeError::BufferTooSmall)?,
+        );
+        tr.copy_from_slice(
+            sk.get(64..128)
+                .ok_or(encoding::EncodeError::BufferTooSmall)?,
+        );
         // Decode each secret row straight into its NTT slot. Going
         // through the whole-sk `DecodedSk` tuple instead would build
         // s1/s2/t0 in `sk_decode`'s frame and then copy the tuple into

@@ -165,19 +165,46 @@ pub fn sig_z_row<const K: usize, const L: usize>(
     bit_unpack(slice, params.gamma1, z_bits)
 }
 
-/// `i`-th `s1` / `s2` / `t0` row decoded straight from `sk`, without
-/// materializing the sibling rows. The sign path decodes each row
-/// into its NTT slot one at a time, so the whole-sk `DecodedSk` tuple
-/// (built in `sk_decode`'s frame, then copied into the caller's) never
-/// materializes a second copy on the stack.
+/// Per-row secret-key decoders used by the sign path: each decodes one
+/// `s1` / `s2` / `t0` polynomial straight from the `sk` byte slice
+/// without materializing the sibling rows, so the whole-sk `DecodedSk`
+/// tuple (built in `sk_decode`'s frame, then copied into the caller's)
+/// never materializes a second copy on the stack. The row index is
+/// bounds-checked against `L` / `K`, and every slice into `sk` goes
+/// through `.get()` so a malformed or out-of-range request returns
+/// `BufferTooSmall` rather than panicking.
+fn sk_s_eta<const K: usize, const L: usize>(params: &Params<K, L>) -> (u32, usize) {
+    let eta = params.eta.value();
+    (eta, bitlen(2 * eta))
+}
+
 fn sk_s_chunk<const K: usize, const L: usize>(params: &Params<K, L>) -> usize {
-    32 * bitlen(2 * params.eta.value())
+    32 * sk_s_eta(params).1
+}
+
+/// `(b, bits)` for the `t0` BitPack range — single source of truth so
+/// `sk_t0_chunk` and `sk_t0_row` can't drift if `D` changes.
+fn sk_t0_packing() -> (u32, usize) {
+    let t0_b = 1u32 << (D - 1);
+    let t0_a = t0_b - 1;
+    (t0_b, bitlen(t0_a + t0_b))
 }
 
 fn sk_t0_chunk() -> usize {
-    let t0_a = (1u32 << (D - 1)) - 1;
-    let t0_b = 1u32 << (D - 1);
-    32 * bitlen(t0_a + t0_b)
+    32 * sk_t0_packing().1
+}
+
+/// Decode one `eta`-range secret row at byte offset `off` in `sk`.
+fn decode_s_row<const K: usize, const L: usize>(
+    params: &Params<K, L>,
+    sk: &[u8],
+    off: usize,
+) -> Result<Poly<u32>, EncodeError> {
+    let (eta, eta_bits) = sk_s_eta(params);
+    let src = sk
+        .get(off..off + sk_s_chunk(params))
+        .ok_or(EncodeError::BufferTooSmall)?;
+    bit_unpack(src, eta, eta_bits)
 }
 
 pub fn sk_s1_row<const K: usize, const L: usize>(
@@ -185,12 +212,10 @@ pub fn sk_s1_row<const K: usize, const L: usize>(
     sk: &[u8],
     i: usize,
 ) -> Result<Poly<u32>, EncodeError> {
-    let s_chunk = sk_s_chunk(params);
-    let off = 128 + i * s_chunk;
-    let src = sk
-        .get(off..off + s_chunk)
-        .ok_or(EncodeError::BufferTooSmall)?;
-    bit_unpack(src, params.eta.value(), bitlen(2 * params.eta.value()))
+    if i >= L {
+        return Err(EncodeError::BufferTooSmall);
+    }
+    decode_s_row(params, sk, 128 + i * sk_s_chunk(params))
 }
 
 pub fn sk_s2_row<const K: usize, const L: usize>(
@@ -198,12 +223,10 @@ pub fn sk_s2_row<const K: usize, const L: usize>(
     sk: &[u8],
     i: usize,
 ) -> Result<Poly<u32>, EncodeError> {
-    let s_chunk = sk_s_chunk(params);
-    let off = 128 + (L + i) * s_chunk;
-    let src = sk
-        .get(off..off + s_chunk)
-        .ok_or(EncodeError::BufferTooSmall)?;
-    bit_unpack(src, params.eta.value(), bitlen(2 * params.eta.value()))
+    if i >= K {
+        return Err(EncodeError::BufferTooSmall);
+    }
+    decode_s_row(params, sk, 128 + (L + i) * sk_s_chunk(params))
 }
 
 pub fn sk_t0_row<const K: usize, const L: usize>(
@@ -211,14 +234,16 @@ pub fn sk_t0_row<const K: usize, const L: usize>(
     sk: &[u8],
     i: usize,
 ) -> Result<Poly<u32>, EncodeError> {
-    let s_chunk = sk_s_chunk(params);
+    if i >= K {
+        return Err(EncodeError::BufferTooSmall);
+    }
     let t0_chunk = sk_t0_chunk();
-    let off = 128 + (L + K) * s_chunk + i * t0_chunk;
+    let off = 128 + (L + K) * sk_s_chunk(params) + i * t0_chunk;
     let src = sk
         .get(off..off + t0_chunk)
         .ok_or(EncodeError::BufferTooSmall)?;
-    let t0_b = 1u32 << (D - 1);
-    bit_unpack(src, t0_b, bitlen(((1u32 << (D - 1)) - 1) + t0_b))
+    let (t0_b, t0_bits) = sk_t0_packing();
+    bit_unpack(src, t0_b, t0_bits)
 }
 
 /// Subslice of `sig` covering the encoded hint, suitable for
@@ -291,8 +316,9 @@ pub fn validate_hint_bytes<const K: usize>(hint: &[u8], omega: usize) -> bool {
 
 /// Decoded secret-key components produced by [`sk_decode`]. The sign
 /// path decodes rows individually via `sk_s1_row` / `sk_s2_row` /
-/// `sk_t0_row`, so the whole-sk decode is exercised only by tests.
-#[allow(dead_code)]
+/// `sk_t0_row`, so the whole-sk decode is exercised only by the
+/// round-trip tests — hence `#[cfg(test)]`.
+#[cfg(test)]
 pub type DecodedSk<const K: usize, const L: usize> = (
     [u8; 32],
     [u8; 32],
@@ -378,8 +404,10 @@ pub fn sk_encode<const K: usize, const L: usize>(
     Ok(())
 }
 
-/// skDecode (FIPS 204 Alg 25).
-#[allow(dead_code)]
+/// skDecode (FIPS 204 Alg 25). Inverse of [`sk_encode`]; the sign path
+/// streams rows via the `sk_*_row` accessors, so this whole-sk form is
+/// kept for the encode/decode round-trip tests.
+#[cfg(test)]
 pub fn sk_decode<const K: usize, const L: usize>(
     params: &Params<K, L>,
     sk: &[u8],
