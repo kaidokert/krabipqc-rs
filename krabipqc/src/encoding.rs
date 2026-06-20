@@ -272,8 +272,13 @@ impl<'a> SkSecretReader<'a> {
         let (s1, rest) = body
             .split_at_checked(s_chunk.saturating_mul(L))
             .ok_or(EncodeError::BufferTooSmall)?;
-        let (s2, t0) = rest
+        let (s2, rest) = rest
             .split_at_checked(s_chunk.saturating_mul(K))
+            .ok_or(EncodeError::BufferTooSmall)?;
+        // Carve t0 to exactly K rows too, so a truncated key fails here
+        // rather than later inside `t0_row`.
+        let (t0, _) = rest
+            .split_at_checked(t0_chunk.saturating_mul(K))
             .ok_or(EncodeError::BufferTooSmall)?;
         Ok(Self {
             s1,
