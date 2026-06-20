@@ -4,7 +4,7 @@
 //! Internal API (`*_internal`) takes the random inputs as parameters
 //! so the result is deterministic — what NIST ACVP tests.
 
-use fixed_bigint::{Nct, Personality};
+use fixed_bigint::Personality;
 use zeroize::Zeroizing;
 
 use crate::encoding::EncodeError;
@@ -54,17 +54,6 @@ where
     Ok(())
 }
 
-/// ML-KEM.KeyGen_internal (Alg 16), Nct-default shim.
-pub fn keygen_internal<const K: usize>(
-    params: &Params<K>,
-    d: &[u8; 32],
-    z: &[u8; 32],
-    ek_out: &mut [u8],
-    dk_out: &mut [u8],
-) -> Result<(), EncodeError> {
-    keygen_internal_impl::<K, Nct>(params, d, z, ek_out, dk_out)
-}
-
 /// ML-KEM.Encaps_internal (Alg 17), generic over personality `P`.
 pub fn encaps_internal_impl<const K: usize, P>(
     params: &Params<K>,
@@ -98,17 +87,6 @@ where
     r.copy_from_slice(r_src);
 
     pke::encrypt_impl::<K, P>(params, ek, m, &r, ct_out)
-}
-
-/// ML-KEM.Encaps_internal (Alg 17), Nct-default shim.
-pub fn encaps_internal<const K: usize>(
-    params: &Params<K>,
-    ek: &[u8],
-    m: &[u8; 32],
-    ss_out: &mut [u8; SS_BYTES],
-    ct_out: &mut [u8],
-) -> Result<(), EncodeError> {
-    encaps_internal_impl::<K, Nct>(params, ek, m, ss_out, ct_out)
 }
 
 /// ML-KEM.Decaps_internal (Alg 18), generic over personality `P`.
@@ -170,16 +148,6 @@ where
     Ok(())
 }
 
-/// ML-KEM.Decaps_internal (Alg 18), Nct-default shim.
-pub fn decaps_internal<const K: usize>(
-    params: &Params<K>,
-    dk: &[u8],
-    ct: &[u8],
-    ss_out: &mut [u8; SS_BYTES],
-) -> Result<(), EncodeError> {
-    decaps_internal_impl::<K, Nct>(params, dk, ct, ss_out)
-}
-
 /// Constant-time byte-slice equality, returning 0xFF on equal else 0x00.
 /// `zip` would silently truncate to the shorter operand and return 0xFF
 /// on a shared prefix, so length mismatch is surfaced as Err.
@@ -200,21 +168,22 @@ fn ct_equal(a: &[u8], b: &[u8]) -> Result<u8, EncodeError> {
 mod tests {
     use super::*;
     use crate::mlkem::params::{ML_KEM_512, ML_KEM_768, ML_KEM_1024};
+    use fixed_bigint::{Ct, Nct};
 
     fn roundtrip<const K: usize>(params: &Params<K>) {
         let d = [0xAAu8; 32];
         let z = [0xBBu8; 32];
         let mut ek = vec![0u8; params.ek_bytes];
         let mut dk = vec![0u8; params.dk_bytes];
-        keygen_internal(params, &d, &z, &mut ek, &mut dk).unwrap();
+        keygen_internal_impl::<K, Nct>(params, &d, &z, &mut ek, &mut dk).unwrap();
 
         let m = [0xC5u8; 32];
         let mut ss_enc = [0u8; SS_BYTES];
         let mut ct = vec![0u8; params.ct_bytes];
-        encaps_internal(params, &ek, &m, &mut ss_enc, &mut ct).unwrap();
+        encaps_internal_impl::<K, Nct>(params, &ek, &m, &mut ss_enc, &mut ct).unwrap();
 
         let mut ss_dec = [0u8; SS_BYTES];
-        decaps_internal(params, &dk, &ct, &mut ss_dec).unwrap();
+        decaps_internal_impl::<K, Nct>(params, &dk, &ct, &mut ss_dec).unwrap();
         assert_eq!(ss_dec, ss_enc, "shared secret mismatch");
     }
 
@@ -240,28 +209,25 @@ mod tests {
         let z = [10u8; 32];
         let mut ek = vec![0u8; params.ek_bytes];
         let mut dk = vec![0u8; params.dk_bytes];
-        keygen_internal(params, &d, &z, &mut ek, &mut dk).unwrap();
+        keygen_internal_impl::<3, Nct>(params, &d, &z, &mut ek, &mut dk).unwrap();
 
         let mut ss = [0u8; SS_BYTES];
         let mut ct = vec![0u8; params.ct_bytes];
-        encaps_internal(params, &ek, &[11u8; 32], &mut ss, &mut ct).unwrap();
+        encaps_internal_impl::<3, Nct>(params, &ek, &[11u8; 32], &mut ss, &mut ct).unwrap();
         ct.push(0xAA);
 
         let mut bogus = [0u8; SS_BYTES];
         assert_eq!(
-            decaps_internal(params, &dk, &ct, &mut bogus),
+            decaps_internal_impl::<3, Nct>(params, &dk, &ct, &mut bogus),
             Err(EncodeError::BufferTooSmall)
         );
     }
 
     /// Cross-personality equivalence: same seeds/randomness through the
     /// Nct and Ct paths must produce byte-identical `ek`, `dk`, `ss`,
-    /// and `ct`. Load-bearing claim for the Ct facade.
-    fn cross_personality_equiv<const K: usize>(params: &Params<K>)
-    where
-        fixed_bigint::Ct: FieldExt<fixed_bigint::Ct>,
-    {
-        use fixed_bigint::Ct;
+    /// and `ct`. Load-bearing for routing the per-set facade through
+    /// `Ct` without diverging on output bytes.
+    fn cross_personality_equiv<const K: usize>(params: &Params<K>) {
         let d = [0x5Au8; 32];
         let z = [0xA5u8; 32];
         let mut ek_nct = vec![0u8; params.ek_bytes];
@@ -316,7 +282,7 @@ mod tests {
         let z = [5u8; 32];
         let mut ek = vec![0u8; params.ek_bytes];
         let mut dk = vec![0u8; params.dk_bytes];
-        keygen_internal(params, &d, &z, &mut ek, &mut dk).unwrap();
+        keygen_internal_impl::<3, Nct>(params, &d, &z, &mut ek, &mut dk).unwrap();
 
         // First coefficient is `ek[0] | ((ek[1] & 0x0F) << 8)`; force to 0xFFF.
         ek[0] = 0xFF;
@@ -325,7 +291,7 @@ mod tests {
         let mut ss = [0u8; SS_BYTES];
         let mut ct = vec![0u8; params.ct_bytes];
         assert_eq!(
-            encaps_internal(params, &ek, &[6u8; 32], &mut ss, &mut ct),
+            encaps_internal_impl::<3, Nct>(params, &ek, &[6u8; 32], &mut ss, &mut ct),
             Err(EncodeError::NotCanonical)
         );
     }
@@ -337,17 +303,17 @@ mod tests {
         let z = [2u8; 32];
         let mut ek = vec![0u8; params.ek_bytes];
         let mut dk = vec![0u8; params.dk_bytes];
-        keygen_internal(params, &d, &z, &mut ek, &mut dk).unwrap();
+        keygen_internal_impl::<3, Nct>(params, &d, &z, &mut ek, &mut dk).unwrap();
 
         let mut ss_enc = [0u8; SS_BYTES];
         let mut ct = vec![0u8; params.ct_bytes];
-        encaps_internal(params, &ek, &[3u8; 32], &mut ss_enc, &mut ct).unwrap();
+        encaps_internal_impl::<3, Nct>(params, &ek, &[3u8; 32], &mut ss_enc, &mut ct).unwrap();
 
         // Flip a bit and re-decaps — should yield the implicit-rejection key,
         // not the original shared secret.
         ct[0] ^= 1;
         let mut ss_dec = [0u8; SS_BYTES];
-        decaps_internal(params, &dk, &ct, &mut ss_dec).unwrap();
+        decaps_internal_impl::<3, Nct>(params, &dk, &ct, &mut ss_dec).unwrap();
         assert_ne!(ss_dec, ss_enc);
     }
 }
