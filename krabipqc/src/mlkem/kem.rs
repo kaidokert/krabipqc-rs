@@ -135,33 +135,15 @@ where
     let mut k_bar = Zeroizing::new([0u8; 32]);
     shake256(&[z, ct], &mut *k_bar);
 
-    let mut ct_prime_buf: Zeroizing<[u8; 2048]> = Zeroizing::new([0u8; 2048]); // worst case 1568 (ML-KEM-1024).
-    let ct_prime = ct_prime_buf
-        .get_mut(..params.ct_bytes)
-        .ok_or(EncodeError::BufferTooSmall)?;
-    pke::encrypt_impl::<K, P>(params, ek_pke, &m_prime, &r_prime, ct_prime)?;
-
-    let eq = ct_equal(ct, ct_prime)?;
+    // FO re-encrypt and constant-time compare: generates each u_row and v into
+    // a per-row scratch buffer (≤352 bytes) and XORs against ct, accumulating
+    // a single diff byte. Avoids the ~2 KiB ct_prime buffer that buffering the
+    // full re-encrypted ciphertext would require.
+    let eq = pke::encrypt_compare_impl::<K, P>(params, ek_pke, &m_prime, &r_prime, ct)?;
     for i in 0..32 {
         ss_out[i] = (k_prime[i] & eq) | (k_bar[i] & !eq);
     }
     Ok(())
-}
-
-/// Constant-time byte-slice equality, returning 0xFF on equal else 0x00.
-/// `zip` would silently truncate to the shorter operand and return 0xFF
-/// on a shared prefix, so length mismatch is surfaced as Err.
-#[inline]
-fn ct_equal(a: &[u8], b: &[u8]) -> Result<u8, EncodeError> {
-    if a.len() != b.len() {
-        return Err(EncodeError::BufferTooSmall);
-    }
-    let mut diff = 0u8;
-    for (x, y) in a.iter().zip(b.iter()) {
-        diff |= x ^ y;
-    }
-    let nonzero = (diff as u32).wrapping_sub(1) >> 31; // 1 if diff == 0, 0 otherwise
-    Ok((nonzero as u8).wrapping_neg()) // 0xFF if 1, 0x00 if 0
 }
 
 #[cfg(test)]

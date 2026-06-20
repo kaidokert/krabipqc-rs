@@ -14,7 +14,7 @@ use crate::mlkem::encoding::{
 };
 use crate::mlkem::ntt;
 use crate::mlkem::params::{N, Params, Q, Q_N_PRIME, Q_R2_MOD_Q};
-use crate::mlkem::sampling::{expand_a, sample_ntt, sample_re, sample_se};
+use crate::mlkem::sampling::{expand_a, sample_e1_row, sample_ntt, sample_re_y_e2, sample_se};
 use crate::poly::Poly;
 use crate::polyvec::PolyVec;
 
@@ -114,32 +114,34 @@ where
     }
     rho.copy_from_slice(rho_src);
 
-    // y, e1, e2 are derived from `r` (secret in the FO re-encrypt path).
-    // Wrap immediately so the raw sample_re output doesn't outlive its
-    // destructure on the stack.
-    let (y_raw, e1_raw, e2_raw) = sample_re::<K>(r, params.eta1, params.eta2)?;
+    // y and e2 sampled up front; e1 is sampled on demand per u_row to avoid
+    // holding K polys of e1 on the stack alongside y and a_row.
+    let (y_raw, e2_raw) = sample_re_y_e2::<K>(r, params.eta1, params.eta2)?;
     let mut y: Zeroizing<PolyVec<u32, K>> = Zeroizing::new(y_raw);
-    let e1: Zeroizing<PolyVec<u32, K>> = Zeroizing::new(e1_raw);
     let e2: Zeroizing<Poly<u32>> = Zeroizing::new(e2_raw);
     for i in 0..K {
         ntt::ntt::<P>(&mut y.v[i]);
     }
     // y now holds y_hat.
 
-    // Materialize t_hat into Mont form once so the dot product can fuse REDC.
-    let mut t_hat: Zeroizing<PolyVec<u32, K>> = Zeroizing::new(PolyVec::zero());
+    // Stream t_hat one column at a time to avoid materializing the full
+    // K-poly PolyVec on the stack. Each t_hat[j] is decoded and immediately
+    // multiplied into v_ntt, then discarded.
+    let mut v_ntt: Zeroizing<Poly<u32>> = Zeroizing::new(Poly::zero());
     for j in 0..K {
         let chunk = ek
             .get(j * 384..(j + 1) * 384)
             .ok_or(EncodeError::BufferTooSmall)?;
-        let t_hat_j_canon: Zeroizing<Poly<u32>> = Zeroizing::new(byte_decode(chunk, 12)?);
+        let mut t_hat_j: Zeroizing<Poly<u32>> = Zeroizing::new(byte_decode(chunk, 12)?);
         for k in 0..N {
-            t_hat.v[j].coeffs[k] =
-                <P as FieldExt<P>>::reduce(t_hat_j_canon.coeffs[k], Q, Q_N_PRIME, Q_R2_MOD_Q);
+            t_hat_j.coeffs[k] =
+                <P as FieldExt<P>>::reduce(t_hat_j.coeffs[k], Q, Q_N_PRIME, Q_R2_MOD_Q);
+        }
+        let prod: Zeroizing<Poly<u32>> = Zeroizing::new(ntt::mul_ntt::<P>(&t_hat_j, &y.v[j]));
+        for k in 0..N {
+            v_ntt.coeffs[k] = pr::add::<u32>(v_ntt.coeffs[k], prod.coeffs[k], Q);
         }
     }
-    let mut v_ntt: Zeroizing<Poly<u32>> = Zeroizing::new(Poly::zero());
-    ntt::mul_ntt_acc::<K, P>(&mut v_ntt, &t_hat.v, &y.v);
     // inv_NTT v_ntt in place — variable transitions from NTT-domain
     // accumulator to time-domain v without a copy.
     ntt::inv_ntt::<P>(&mut v_ntt);
@@ -166,8 +168,9 @@ where
         let mut u_row: Zeroizing<Poly<u32>> = Zeroizing::new(Poly::zero());
         ntt::mul_ntt_acc::<K, P>(&mut u_row, &a_row.v, &y.v);
         ntt::inv_ntt::<P>(&mut u_row);
+        let e1_i: Zeroizing<Poly<u32>> = Zeroizing::new(sample_e1_row::<K>(r, i, params.eta2)?);
         for k in 0..N {
-            u_row.coeffs[k] = pr::add::<u32>(u_row.coeffs[k], e1.v[i].coeffs[k], Q);
+            u_row.coeffs[k] = pr::add::<u32>(u_row.coeffs[k], e1_i.coeffs[k], Q);
         }
         let u_row_compressed = compress_poly(&u_row, params.du);
         let slot = ct_out
@@ -182,6 +185,113 @@ where
         .ok_or(EncodeError::BufferTooSmall)?;
     byte_encode(&v_compressed, params.dv, v_slot)?;
     Ok(())
+}
+
+/// FO re-encrypt + constant-time compare, without materializing the full ciphertext.
+///
+/// Identical computation to [`encrypt_impl`] for the `u` rows and `v` poly,
+/// but instead of writing to a `ct_out` buffer each row is encoded into a
+/// 352-byte scratch buffer, XOR'd against the corresponding slice of `ct_ref`,
+/// and discarded. The accumulated `diff` byte is converted to a CT-equality
+/// mask (0xFF = equal, 0x00 = different) and returned. This avoids the
+/// 768–2048-byte `ct_prime` buffer that the calller would otherwise need.
+pub(crate) fn encrypt_compare_impl<const K: usize, P>(
+    params: &Params<K>,
+    ek: &[u8],
+    m: &[u8; 32],
+    r: &[u8; 32],
+    ct_ref: &[u8],
+) -> Result<u8, EncodeError>
+where
+    P: Personality + FieldExt<P>,
+{
+    let mut rho = [0u8; 32];
+    let rho_src = ek.get(384 * K..).ok_or(EncodeError::BufferTooSmall)?;
+    if rho_src.len() != 32 {
+        return Err(EncodeError::BufferTooSmall);
+    }
+    rho.copy_from_slice(rho_src);
+
+    let (y_raw, e2_raw) = sample_re_y_e2::<K>(r, params.eta1, params.eta2)?;
+    let mut y: Zeroizing<PolyVec<u32, K>> = Zeroizing::new(y_raw);
+    let e2: Zeroizing<Poly<u32>> = Zeroizing::new(e2_raw);
+    for i in 0..K {
+        ntt::ntt::<P>(&mut y.v[i]);
+    }
+
+    let mut v_ntt: Zeroizing<Poly<u32>> = Zeroizing::new(Poly::zero());
+    for j in 0..K {
+        let chunk = ek
+            .get(j * 384..(j + 1) * 384)
+            .ok_or(EncodeError::BufferTooSmall)?;
+        let mut t_hat_j: Zeroizing<Poly<u32>> = Zeroizing::new(byte_decode(chunk, 12)?);
+        for k in 0..N {
+            t_hat_j.coeffs[k] =
+                <P as FieldExt<P>>::reduce(t_hat_j.coeffs[k], Q, Q_N_PRIME, Q_R2_MOD_Q);
+        }
+        let prod: Zeroizing<Poly<u32>> = Zeroizing::new(ntt::mul_ntt::<P>(&t_hat_j, &y.v[j]));
+        for k in 0..N {
+            v_ntt.coeffs[k] = pr::add::<u32>(v_ntt.coeffs[k], prod.coeffs[k], Q);
+        }
+    }
+    ntt::inv_ntt::<P>(&mut v_ntt);
+    let mu: Zeroizing<Poly<u32>> = Zeroizing::new(decompress_poly(&byte_decode(m, 1)?, 1));
+    for k in 0..N {
+        v_ntt.coeffs[k] = pr::add::<u32>(
+            pr::add::<u32>(v_ntt.coeffs[k], e2.coeffs[k], Q),
+            mu.coeffs[k],
+            Q,
+        );
+    }
+    let v_buf = v_ntt;
+
+    let c1_len = 32 * params.du * K;
+    let c2_len = 32 * params.dv;
+    let u_chunk = 32 * params.du;
+
+    let mut diff = 0u8;
+    for i in 0..K {
+        let mut a_row: PolyVec<u32, K> = PolyVec::zero();
+        for j in 0..K {
+            a_row.v[j] = sample_ntt(&rho, i as u8, j as u8);
+        }
+        let mut u_row: Zeroizing<Poly<u32>> = Zeroizing::new(Poly::zero());
+        ntt::mul_ntt_acc::<K, P>(&mut u_row, &a_row.v, &y.v);
+        ntt::inv_ntt::<P>(&mut u_row);
+        let e1_i: Zeroizing<Poly<u32>> = Zeroizing::new(sample_e1_row::<K>(r, i, params.eta2)?);
+        for k in 0..N {
+            u_row.coeffs[k] = pr::add::<u32>(u_row.coeffs[k], e1_i.coeffs[k], Q);
+        }
+        let u_row_compressed = compress_poly(&u_row, params.du);
+        // max du = 11 → 32*11 = 352 bytes; sized for worst-case ML-KEM-1024.
+        let mut u_tmp = [0u8; 32 * 11];
+        let u_tmp_used = u_tmp
+            .get_mut(..u_chunk)
+            .ok_or(EncodeError::BufferTooSmall)?;
+        byte_encode(&u_row_compressed, params.du, u_tmp_used)?;
+        let ct_u = ct_ref
+            .get(i * u_chunk..(i + 1) * u_chunk)
+            .ok_or(EncodeError::BufferTooSmall)?;
+        for (a, b) in u_tmp_used.iter().zip(ct_u.iter()) {
+            diff |= a ^ b;
+        }
+    }
+
+    let v_compressed = compress_poly(&v_buf, params.dv);
+    // max dv = 5 → 32*5 = 160 bytes; sized for worst-case ML-KEM-1024.
+    let mut v_tmp = [0u8; 32 * 5];
+    let v_tmp_used = v_tmp.get_mut(..c2_len).ok_or(EncodeError::BufferTooSmall)?;
+    byte_encode(&v_compressed, params.dv, v_tmp_used)?;
+    let ct_v = ct_ref
+        .get(c1_len..c1_len + c2_len)
+        .ok_or(EncodeError::BufferTooSmall)?;
+    for (a, b) in v_tmp_used.iter().zip(ct_v.iter()) {
+        diff |= a ^ b;
+    }
+
+    // CT-equality mask: 0xFF if all bytes matched, 0x00 otherwise.
+    let nonzero = (diff as u32).wrapping_sub(1) >> 31;
+    Ok((nonzero as u8).wrapping_neg())
 }
 
 /// K-PKE.Decrypt (Alg 14), generic over personality `P`.
