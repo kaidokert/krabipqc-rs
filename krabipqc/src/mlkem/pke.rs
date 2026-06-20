@@ -132,11 +132,10 @@ where
         let chunk = ek
             .get(j * 384..(j + 1) * 384)
             .ok_or(EncodeError::BufferTooSmall)?;
-        let t_hat_j_canon: Zeroizing<Poly<u32>> = Zeroizing::new(byte_decode(chunk, 12)?);
-        let mut t_hat_j: Zeroizing<Poly<u32>> = Zeroizing::new(Poly::zero());
+        let mut t_hat_j: Zeroizing<Poly<u32>> = Zeroizing::new(byte_decode(chunk, 12)?);
         for k in 0..N {
             t_hat_j.coeffs[k] =
-                <P as FieldExt<P>>::reduce(t_hat_j_canon.coeffs[k], Q, Q_N_PRIME, Q_R2_MOD_Q);
+                <P as FieldExt<P>>::reduce(t_hat_j.coeffs[k], Q, Q_N_PRIME, Q_R2_MOD_Q);
         }
         let prod: Zeroizing<Poly<u32>> = Zeroizing::new(ntt::mul_ntt::<P>(&t_hat_j, &y.v[j]));
         for k in 0..N {
@@ -169,7 +168,7 @@ where
         let mut u_row: Zeroizing<Poly<u32>> = Zeroizing::new(Poly::zero());
         ntt::mul_ntt_acc::<K, P>(&mut u_row, &a_row.v, &y.v);
         ntt::inv_ntt::<P>(&mut u_row);
-        let e1_i: Poly<u32> = sample_e1_row::<K>(r, i, params.eta2)?;
+        let e1_i: Zeroizing<Poly<u32>> = Zeroizing::new(sample_e1_row::<K>(r, i, params.eta2)?);
         for k in 0..N {
             u_row.coeffs[k] = pr::add::<u32>(u_row.coeffs[k], e1_i.coeffs[k], Q);
         }
@@ -225,11 +224,10 @@ where
         let chunk = ek
             .get(j * 384..(j + 1) * 384)
             .ok_or(EncodeError::BufferTooSmall)?;
-        let t_hat_j_canon: Zeroizing<Poly<u32>> = Zeroizing::new(byte_decode(chunk, 12)?);
-        let mut t_hat_j: Zeroizing<Poly<u32>> = Zeroizing::new(Poly::zero());
+        let mut t_hat_j: Zeroizing<Poly<u32>> = Zeroizing::new(byte_decode(chunk, 12)?);
         for k in 0..N {
             t_hat_j.coeffs[k] =
-                <P as FieldExt<P>>::reduce(t_hat_j_canon.coeffs[k], Q, Q_N_PRIME, Q_R2_MOD_Q);
+                <P as FieldExt<P>>::reduce(t_hat_j.coeffs[k], Q, Q_N_PRIME, Q_R2_MOD_Q);
         }
         let prod: Zeroizing<Poly<u32>> = Zeroizing::new(ntt::mul_ntt::<P>(&t_hat_j, &y.v[j]));
         for k in 0..N {
@@ -260,7 +258,7 @@ where
         let mut u_row: Zeroizing<Poly<u32>> = Zeroizing::new(Poly::zero());
         ntt::mul_ntt_acc::<K, P>(&mut u_row, &a_row.v, &y.v);
         ntt::inv_ntt::<P>(&mut u_row);
-        let e1_i: Poly<u32> = sample_e1_row::<K>(r, i, params.eta2)?;
+        let e1_i: Zeroizing<Poly<u32>> = Zeroizing::new(sample_e1_row::<K>(r, i, params.eta2)?);
         for k in 0..N {
             u_row.coeffs[k] = pr::add::<u32>(u_row.coeffs[k], e1_i.coeffs[k], Q);
         }
