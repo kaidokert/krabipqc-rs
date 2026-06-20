@@ -189,6 +189,11 @@ fn sk_t0_packing() -> (u32, usize) {
 /// chunk (sizes are `saturating_mul` so a degenerate parameter set
 /// caps out instead of wrapping) and a short key surfaces as
 /// `BufferTooSmall` instead of panicking.
+///
+/// The `lowmem` sign path re-derives rows on demand via
+/// [`SkSecretReader`] instead, so this whole-secret decode is the
+/// default path only.
+#[cfg(not(feature = "lowmem"))]
 pub(crate) fn decode_sk_secrets<const K: usize, const L: usize>(
     params: &Params<K, L>,
     sk: &[u8],
@@ -225,6 +230,95 @@ pub(crate) fn decode_sk_secrets<const K: usize, const L: usize>(
         cur = rest;
     }
     Ok(())
+}
+
+/// Random-access view over the `s1` / `s2` / `t0` rows of an `sk`, for
+/// the `lowmem` sign path which re-derives one secret row at a time
+/// inside the kappa loop instead of holding the `s1_hat` / `s2_hat` /
+/// `t0_hat` PolyVecs. The three regions are carved once with
+/// `split_at_checked`; each row is `chunks_exact(..).nth(i)`, so no byte
+/// offset is computed and a malformed key or out-of-range row yields
+/// `BufferTooSmall` rather than panicking. Holds only borrows of `sk`,
+/// so the reader itself costs no secret stack.
+#[cfg(feature = "lowmem")]
+pub(crate) struct SkSecretReader<'a> {
+    s1: &'a [u8],
+    s2: &'a [u8],
+    t0: &'a [u8],
+    eta: u32,
+    eta_bits: usize,
+    s_chunk: usize,
+    t0_b: u32,
+    t0_bits: usize,
+    t0_chunk: usize,
+}
+
+#[cfg(feature = "lowmem")]
+impl<'a> SkSecretReader<'a> {
+    pub(crate) fn new<const K: usize, const L: usize>(
+        params: &Params<K, L>,
+        sk: &'a [u8],
+    ) -> Result<Self, EncodeError> {
+        let (eta, eta_bits) = sk_s_packing(params);
+        let s_chunk = eta_bits.saturating_mul(32);
+        let (t0_b, t0_bits) = sk_t0_packing();
+        let t0_chunk = t0_bits.saturating_mul(32);
+        // `chunks_exact` panics on a zero chunk size; a degenerate
+        // (eta = 0) parameter set is rejected here instead.
+        if s_chunk == 0 || t0_chunk == 0 {
+            return Err(EncodeError::BufferTooSmall);
+        }
+        let body = sk.get(128..).ok_or(EncodeError::BufferTooSmall)?;
+        let (s1, rest) = body
+            .split_at_checked(s_chunk.saturating_mul(L))
+            .ok_or(EncodeError::BufferTooSmall)?;
+        let (s2, rest) = rest
+            .split_at_checked(s_chunk.saturating_mul(K))
+            .ok_or(EncodeError::BufferTooSmall)?;
+        // Carve t0 to exactly K rows too, so a truncated key fails here
+        // rather than later inside `t0_row`.
+        let (t0, _) = rest
+            .split_at_checked(t0_chunk.saturating_mul(K))
+            .ok_or(EncodeError::BufferTooSmall)?;
+        Ok(Self {
+            s1,
+            s2,
+            t0,
+            eta,
+            eta_bits,
+            s_chunk,
+            t0_b,
+            t0_bits,
+            t0_chunk,
+        })
+    }
+
+    pub(crate) fn s1_row(&self, i: usize) -> Result<Poly<u32>, EncodeError> {
+        let row = self
+            .s1
+            .chunks_exact(self.s_chunk)
+            .nth(i)
+            .ok_or(EncodeError::BufferTooSmall)?;
+        bit_unpack(row, self.eta, self.eta_bits)
+    }
+
+    pub(crate) fn s2_row(&self, i: usize) -> Result<Poly<u32>, EncodeError> {
+        let row = self
+            .s2
+            .chunks_exact(self.s_chunk)
+            .nth(i)
+            .ok_or(EncodeError::BufferTooSmall)?;
+        bit_unpack(row, self.eta, self.eta_bits)
+    }
+
+    pub(crate) fn t0_row(&self, i: usize) -> Result<Poly<u32>, EncodeError> {
+        let row = self
+            .t0
+            .chunks_exact(self.t0_chunk)
+            .nth(i)
+            .ok_or(EncodeError::BufferTooSmall)?;
+        bit_unpack(row, self.t0_b, self.t0_bits)
+    }
 }
 
 /// Subslice of `sig` covering the encoded hint, suitable for

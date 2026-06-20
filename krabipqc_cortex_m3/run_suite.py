@@ -21,18 +21,28 @@ import sys
 TARGET = "thumbv7m-none-eabi"
 TARGET_LABEL = "M3"
 
-# (cargo example name, METRIC algo string, group label)
+# (cargo example name, METRIC algo string, group label, feature list)
+# The default group runs first; the `lowmem` sign variants run last so
+# the feature flip triggers at most one extra rebuild.
 EXAMPLES = [
-    ("ml_dsa_44_verify_stack",       "ml_dsa_44_verify_with_stack", "ml-dsa-44 verify"),
-    ("ml_dsa_44_sign_stack",         "ml_dsa_44_sign",              "ml-dsa-44 sign"),
-    ("ml_dsa_65_verify_stack",       "ml_dsa_65_verify",            "ml-dsa-65 verify"),
-    ("ml_dsa_65_sign_stack",         "ml_dsa_65_sign",              "ml-dsa-65 sign"),
-    ("ml_dsa_87_verify_stack",       "ml_dsa_87_verify",            "ml-dsa-87 verify"),
-    ("ml_dsa_87_sign_stack",         "ml_dsa_87_sign",              "ml-dsa-87 sign"),
-    ("ml_kem_512_decaps_stack",      "ml_kem_512_decaps",           "ml-kem-512 decaps"),
-    ("ml_kem_768_decaps_stack",      "ml_kem_768_decaps",           "ml-kem-768 decaps"),
-    ("ml_kem_1024_decaps_stack",     "ml_kem_1024_decaps",          "ml-kem-1024 decaps"),
+    ("ml_dsa_44_verify_stack",   "ml_dsa_44_verify_with_stack", "ml-dsa-44 verify",        ()),
+    ("ml_dsa_44_sign_stack",     "ml_dsa_44_sign",              "ml-dsa-44 sign",          ()),
+    ("ml_dsa_65_verify_stack",   "ml_dsa_65_verify",            "ml-dsa-65 verify",        ()),
+    ("ml_dsa_65_sign_stack",     "ml_dsa_65_sign",              "ml-dsa-65 sign",          ()),
+    ("ml_dsa_87_verify_stack",   "ml_dsa_87_verify",            "ml-dsa-87 verify",        ()),
+    ("ml_dsa_87_sign_stack",     "ml_dsa_87_sign",              "ml-dsa-87 sign",          ()),
+    ("ml_kem_512_decaps_stack",  "ml_kem_512_decaps",           "ml-kem-512 decaps",       ()),
+    ("ml_kem_768_decaps_stack",  "ml_kem_768_decaps",           "ml-kem-768 decaps",       ()),
+    ("ml_kem_1024_decaps_stack", "ml_kem_1024_decaps",          "ml-kem-1024 decaps",      ()),
+    ("ml_dsa_44_sign_stack",     "ml_dsa_44_sign",              "ml-dsa-44 sign (lowmem)", ("lowmem",)),
+    ("ml_dsa_65_sign_stack",     "ml_dsa_65_sign",              "ml-dsa-65 sign (lowmem)", ("lowmem",)),
+    ("ml_dsa_87_sign_stack",     "ml_dsa_87_sign",              "ml-dsa-87 sign (lowmem)", ("lowmem",)),
 ]
+
+
+def feat_args(features):
+    """Cargo `--features a,b` args, or empty when no features requested."""
+    return ["--features", ",".join(features)] if features else []
 
 TIMEOUT_RUN = 180   # seconds per QEMU run (ML-DSA-87 sign is the long one)
 TIMEOUT_BUILD = 600
@@ -48,10 +58,11 @@ def run_cmd(args, timeout, **kwargs):
         return -1, "", f"command not found: {args[0]}"
 
 
-def build_examples():
+def build_examples(features=()):
     try:
         rc, out, err = run_cmd(
-            ["cargo", "build", "--target", TARGET, "--release", "--examples"],
+            ["cargo", "build", "--target", TARGET, "--release", "--examples"]
+            + feat_args(features),
             timeout=TIMEOUT_BUILD,
         )
     except subprocess.TimeoutExpired:
@@ -68,11 +79,12 @@ def build_examples():
     return True
 
 
-def run_qemu(example):
+def run_qemu(example, features=()):
     """Returns (rc, combined_output). A non-zero rc is a hard failure
     regardless of any ACCEPT/REJECT string in the output."""
     rc, out, err = run_cmd(
-        ["cargo", "run", "--target", TARGET, "--release", "--example", example],
+        ["cargo", "run", "--target", TARGET, "--release", "--example", example]
+        + feat_args(features),
         timeout=TIMEOUT_RUN,
     )
     combined = out + err
@@ -81,7 +93,7 @@ def run_qemu(example):
     return rc, combined
 
 
-def text_size(example):
+def text_size(example, features=()):
     """Return .text section size in bytes via cargo-bloat, or None."""
     try:
         rc, out, _err = run_cmd(
@@ -90,7 +102,8 @@ def text_size(example):
                 "--release", "--target", TARGET,
                 "--example", example,
                 "--message-format=json",
-            ],
+            ]
+            + feat_args(features),
             timeout=TIMEOUT_BUILD,
         )
         if rc != 0:
@@ -120,16 +133,21 @@ def parse_metric(output):
 
 
 def main():
-    if not build_examples():
-        return 1
-
     rows = []
     failures = []
+    built_features = None
 
-    for example, expected_algo, label in EXAMPLES:
+    for example, expected_algo, label, features in EXAMPLES:
+        # Build once per feature set; EXAMPLES is ordered so this flips
+        # at most once (default group, then the lowmem group).
+        if features != built_features:
+            if not build_examples(features):
+                return 1
+            built_features = features
+
         print(f"  Running {example}...", file=sys.stderr)
         try:
-            rc, output = run_qemu(example)
+            rc, output = run_qemu(example, features)
         except subprocess.TimeoutExpired:
             failures.append(f"Timeout: {example}")
             rows.append((label, None, None, None, "TIMEOUT"))
@@ -137,7 +155,7 @@ def main():
 
         accepted = f"{expected_algo} ACCEPT" in output
         metric = parse_metric(output)
-        tsize = text_size(example)
+        tsize = text_size(example, features)
 
         # Non-zero exit from `cargo run` always counts as a failure —
         # a crashed or panicking run can still print ACCEPT/REJECT
