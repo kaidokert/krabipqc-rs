@@ -14,7 +14,7 @@ use crate::mlkem::encoding::{
 };
 use crate::mlkem::ntt;
 use crate::mlkem::params::{N, Params, Q, Q_N_PRIME, Q_R2_MOD_Q};
-use crate::mlkem::sampling::{expand_a, sample_ntt, sample_re, sample_se};
+use crate::mlkem::sampling::{expand_a, sample_e1_row, sample_ntt, sample_re_y_e2, sample_se};
 use crate::poly::Poly;
 use crate::polyvec::PolyVec;
 
@@ -114,32 +114,35 @@ where
     }
     rho.copy_from_slice(rho_src);
 
-    // y, e1, e2 are derived from `r` (secret in the FO re-encrypt path).
-    // Wrap immediately so the raw sample_re output doesn't outlive its
-    // destructure on the stack.
-    let (y_raw, e1_raw, e2_raw) = sample_re::<K>(r, params.eta1, params.eta2)?;
+    // y and e2 sampled up front; e1 is sampled on demand per u_row to avoid
+    // holding K polys of e1 on the stack alongside y and a_row.
+    let (y_raw, e2_raw) = sample_re_y_e2::<K>(r, params.eta1, params.eta2)?;
     let mut y: Zeroizing<PolyVec<u32, K>> = Zeroizing::new(y_raw);
-    let e1: Zeroizing<PolyVec<u32, K>> = Zeroizing::new(e1_raw);
     let e2: Zeroizing<Poly<u32>> = Zeroizing::new(e2_raw);
     for i in 0..K {
         ntt::ntt::<P>(&mut y.v[i]);
     }
     // y now holds y_hat.
 
-    // Materialize t_hat into Mont form once so the dot product can fuse REDC.
-    let mut t_hat: Zeroizing<PolyVec<u32, K>> = Zeroizing::new(PolyVec::zero());
+    // Stream t_hat one column at a time to avoid materializing the full
+    // K-poly PolyVec on the stack. Each t_hat[j] is decoded and immediately
+    // multiplied into v_ntt, then discarded.
+    let mut v_ntt: Zeroizing<Poly<u32>> = Zeroizing::new(Poly::zero());
     for j in 0..K {
         let chunk = ek
             .get(j * 384..(j + 1) * 384)
             .ok_or(EncodeError::BufferTooSmall)?;
         let t_hat_j_canon: Zeroizing<Poly<u32>> = Zeroizing::new(byte_decode(chunk, 12)?);
+        let mut t_hat_j: Zeroizing<Poly<u32>> = Zeroizing::new(Poly::zero());
         for k in 0..N {
-            t_hat.v[j].coeffs[k] =
+            t_hat_j.coeffs[k] =
                 <P as FieldExt<P>>::reduce(t_hat_j_canon.coeffs[k], Q, Q_N_PRIME, Q_R2_MOD_Q);
         }
+        let prod: Zeroizing<Poly<u32>> = Zeroizing::new(ntt::mul_ntt::<P>(&t_hat_j, &y.v[j]));
+        for k in 0..N {
+            v_ntt.coeffs[k] = pr::add::<u32>(v_ntt.coeffs[k], prod.coeffs[k], Q);
+        }
     }
-    let mut v_ntt: Zeroizing<Poly<u32>> = Zeroizing::new(Poly::zero());
-    ntt::mul_ntt_acc::<K, P>(&mut v_ntt, &t_hat.v, &y.v);
     // inv_NTT v_ntt in place — variable transitions from NTT-domain
     // accumulator to time-domain v without a copy.
     ntt::inv_ntt::<P>(&mut v_ntt);
@@ -166,8 +169,9 @@ where
         let mut u_row: Zeroizing<Poly<u32>> = Zeroizing::new(Poly::zero());
         ntt::mul_ntt_acc::<K, P>(&mut u_row, &a_row.v, &y.v);
         ntt::inv_ntt::<P>(&mut u_row);
+        let e1_i: Poly<u32> = sample_e1_row::<K>(r, i, params.eta2)?;
         for k in 0..N {
-            u_row.coeffs[k] = pr::add::<u32>(u_row.coeffs[k], e1.v[i].coeffs[k], Q);
+            u_row.coeffs[k] = pr::add::<u32>(u_row.coeffs[k], e1_i.coeffs[k], Q);
         }
         let u_row_compressed = compress_poly(&u_row, params.du);
         let slot = ct_out
@@ -209,27 +213,29 @@ where
     }
     rho.copy_from_slice(rho_src);
 
-    let (y_raw, e1_raw, e2_raw) = sample_re::<K>(r, params.eta1, params.eta2)?;
+    let (y_raw, e2_raw) = sample_re_y_e2::<K>(r, params.eta1, params.eta2)?;
     let mut y: Zeroizing<PolyVec<u32, K>> = Zeroizing::new(y_raw);
-    let e1: Zeroizing<PolyVec<u32, K>> = Zeroizing::new(e1_raw);
     let e2: Zeroizing<Poly<u32>> = Zeroizing::new(e2_raw);
     for i in 0..K {
         ntt::ntt::<P>(&mut y.v[i]);
     }
 
-    let mut t_hat: Zeroizing<PolyVec<u32, K>> = Zeroizing::new(PolyVec::zero());
+    let mut v_ntt: Zeroizing<Poly<u32>> = Zeroizing::new(Poly::zero());
     for j in 0..K {
         let chunk = ek
             .get(j * 384..(j + 1) * 384)
             .ok_or(EncodeError::BufferTooSmall)?;
         let t_hat_j_canon: Zeroizing<Poly<u32>> = Zeroizing::new(byte_decode(chunk, 12)?);
+        let mut t_hat_j: Zeroizing<Poly<u32>> = Zeroizing::new(Poly::zero());
         for k in 0..N {
-            t_hat.v[j].coeffs[k] =
+            t_hat_j.coeffs[k] =
                 <P as FieldExt<P>>::reduce(t_hat_j_canon.coeffs[k], Q, Q_N_PRIME, Q_R2_MOD_Q);
         }
+        let prod: Zeroizing<Poly<u32>> = Zeroizing::new(ntt::mul_ntt::<P>(&t_hat_j, &y.v[j]));
+        for k in 0..N {
+            v_ntt.coeffs[k] = pr::add::<u32>(v_ntt.coeffs[k], prod.coeffs[k], Q);
+        }
     }
-    let mut v_ntt: Zeroizing<Poly<u32>> = Zeroizing::new(Poly::zero());
-    ntt::mul_ntt_acc::<K, P>(&mut v_ntt, &t_hat.v, &y.v);
     ntt::inv_ntt::<P>(&mut v_ntt);
     let mu: Zeroizing<Poly<u32>> = Zeroizing::new(decompress_poly(&byte_decode(m, 1)?, 1));
     for k in 0..N {
@@ -254,8 +260,9 @@ where
         let mut u_row: Zeroizing<Poly<u32>> = Zeroizing::new(Poly::zero());
         ntt::mul_ntt_acc::<K, P>(&mut u_row, &a_row.v, &y.v);
         ntt::inv_ntt::<P>(&mut u_row);
+        let e1_i: Poly<u32> = sample_e1_row::<K>(r, i, params.eta2)?;
         for k in 0..N {
-            u_row.coeffs[k] = pr::add::<u32>(u_row.coeffs[k], e1.v[i].coeffs[k], Q);
+            u_row.coeffs[k] = pr::add::<u32>(u_row.coeffs[k], e1_i.coeffs[k], Q);
         }
         let u_row_compressed = compress_poly(&u_row, params.du);
         // max du = 11 → 32*11 = 352 bytes; sized for worst-case ML-KEM-1024.

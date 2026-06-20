@@ -123,28 +123,39 @@ pub fn sample_se<const K: usize>(
     Ok((s, e))
 }
 
-/// (r, e1, e2) bundle produced by [`sample_re`] for K-PKE.Encrypt.
-pub type EncryptSamples<const K: usize> = (PolyVec<u32, K>, PolyVec<u32, K>, Poly<u32>);
-
-/// Sample r, e1, e2 for K-PKE.Encrypt (FIPS 203 Alg 13 lines 8-15):
-/// r_i = CBD_eta1(PRF(r_seed, i))           for i in 0..K
-/// e1_i = CBD_eta2(PRF(r_seed, K + i))      for i in 0..K
-/// e2  = CBD_eta2(PRF(r_seed, 2K))
-pub fn sample_re<const K: usize>(
+/// Sample r (= y in encrypt) and e2, skipping e1.
+///
+/// Used by the encrypt paths to avoid holding e1 on the stack while the
+/// u-rows are being generated — each `e1[i]` is sampled on demand via
+/// [`sample_e1_row`] instead. Saves K×1 KiB of peak stack vs the old
+/// `sample_re` bundle.
+///
+/// Nonce assignment (FIPS 203 Alg 13 lines 8-15):
+/// r_i  = CBD_eta1(PRF(r_seed, i))      for i in 0..K
+/// e1_i = CBD_eta2(PRF(r_seed, K + i))  ← skipped here
+/// e2   = CBD_eta2(PRF(r_seed, 2K))
+pub(crate) fn sample_re_y_e2<const K: usize>(
     r_seed: &[u8; 32],
     eta1: Eta,
     eta2: Eta,
-) -> Result<EncryptSamples<K>, EncodeError> {
+) -> Result<(PolyVec<u32, K>, Poly<u32>), EncodeError> {
     let mut r = PolyVec::<u32, K>::zero();
-    let mut e1 = PolyVec::<u32, K>::zero();
     for i in 0..K {
         r.v[i] = sample_cbd_from_seed(r_seed, i as u8, eta1)?;
     }
-    for i in 0..K {
-        e1.v[i] = sample_cbd_from_seed(r_seed, (K + i) as u8, eta2)?;
-    }
     let e2 = sample_cbd_from_seed(r_seed, (2 * K) as u8, eta2)?;
-    Ok((r, e1, e2))
+    Ok((r, e2))
+}
+
+/// Sample the i-th e1 row on demand (FIPS 203 Alg 13 line 10).
+///
+/// Caller passes the loop index `i`; nonce is `K + i`.
+pub(crate) fn sample_e1_row<const K: usize>(
+    r_seed: &[u8; 32],
+    i: usize,
+    eta2: Eta,
+) -> Result<Poly<u32>, EncodeError> {
+    sample_cbd_from_seed(r_seed, (K + i) as u8, eta2)
 }
 
 #[cfg(test)]
