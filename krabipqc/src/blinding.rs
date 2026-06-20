@@ -13,6 +13,7 @@ use modmath::basic::pre_reduced as pr;
 use crate::field_ext::FieldExt;
 use crate::hashing::shake256;
 use crate::poly::Poly;
+#[cfg(not(feature = "lowmem"))]
 use crate::polyvec::PolyVec;
 
 /// Derive a Montgomery-form blinding factor `r ∈ [1, q-1]` and its
@@ -67,8 +68,10 @@ pub fn scale_mont<P: Personality + FieldExt<P>>(
 }
 
 /// Multiply every coefficient of every poly in `v` by `r_mont`
-/// in-place.
+/// in-place. Only the default sign path blinds whole PolyVecs up
+/// front; `lowmem` blinds rows individually via [`scale_mont`].
 #[inline]
+#[cfg(not(feature = "lowmem"))]
 pub fn scale_polyvec_mont<P: Personality + FieldExt<P>, const LEN: usize>(
     v: &mut PolyVec<u32, LEN>,
     r_mont: u32,

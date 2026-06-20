@@ -139,27 +139,29 @@ where
         return Err(encoding::EncodeError::BufferTooSmall);
     }
 
-    // NTT s1/s2/t0 up front so subsequent c·s_hat / c·t0_hat products
-    // across the kappa loop stay in Mont domain. Everything
-    // secret-derived is zeroize-on-drop; `rho` is public.
-    let (rho, big_k, tr, mut s1_hat, mut s2_hat, mut t0_hat) = {
-        let mut rho = [0u8; 32];
-        let mut big_k = Zeroizing::new([0u8; 32]);
-        let mut tr = Zeroizing::new([0u8; 64]);
-        rho.copy_from_slice(sk.get(..32).ok_or(encoding::EncodeError::BufferTooSmall)?);
-        big_k.copy_from_slice(
-            sk.get(32..64)
-                .ok_or(encoding::EncodeError::BufferTooSmall)?,
-        );
-        tr.copy_from_slice(
-            sk.get(64..128)
-                .ok_or(encoding::EncodeError::BufferTooSmall)?,
-        );
-        // Decode the secrets straight into these NTT slots. Going
-        // through the whole-sk `DecodedSk` tuple instead would build
-        // s1/s2/t0 in `sk_decode`'s frame and then copy the tuple into
-        // this one — both live at the return, spiking the high-water
-        // mark above the kappa loop's own peak.
+    // Lift the public header (rho / big_k / tr) out of `sk`; the
+    // secrets are handled below. Everything secret-derived is
+    // zeroize-on-drop; `rho` is public.
+    let mut rho = [0u8; 32];
+    let mut big_k = Zeroizing::new([0u8; 32]);
+    let mut tr = Zeroizing::new([0u8; 64]);
+    rho.copy_from_slice(sk.get(..32).ok_or(encoding::EncodeError::BufferTooSmall)?);
+    big_k.copy_from_slice(
+        sk.get(32..64)
+            .ok_or(encoding::EncodeError::BufferTooSmall)?,
+    );
+    tr.copy_from_slice(
+        sk.get(64..128)
+            .ok_or(encoding::EncodeError::BufferTooSmall)?,
+    );
+
+    // Default: NTT s1/s2/t0 up front so the c·s_hat / c·t0_hat products
+    // across the kappa loop stay in Mont domain; the three PolyVecs
+    // persist for the whole function (cycle-optimized). `lowmem`:
+    // leave the secrets encoded in `sk` behind a borrow-only reader and
+    // re-derive one row per retry below (stack-optimized).
+    #[cfg(not(feature = "lowmem"))]
+    let (mut s1_hat, mut s2_hat, mut t0_hat) = {
         let mut s1_hat: Zeroizing<PolyVec<u32, L>> = Zeroizing::new(PolyVec::zero());
         let mut s2_hat: Zeroizing<PolyVec<u32, K>> = Zeroizing::new(PolyVec::zero());
         let mut t0_hat: Zeroizing<PolyVec<u32, K>> = Zeroizing::new(PolyVec::zero());
@@ -171,21 +173,27 @@ where
             ntt::ntt::<P>(&mut s2_hat.v[i]);
             ntt::ntt::<P>(&mut t0_hat.v[i]);
         }
-        (rho, big_k, tr, s1_hat, s2_hat, t0_hat)
+        (s1_hat, s2_hat, t0_hat)
     };
+    #[cfg(feature = "lowmem")]
+    let sk_reader = encoding::SkSecretReader::new(params, sk)?;
 
     let a_hat = expand_a::<K, L>(&rho);
 
-    // Multiplicative DPA blinding: blind s_hat / t0_hat by r_mont
-    // once up front and c_hat by r_inv_mont inside each kappa retry.
-    // `(c · r_inv) · (s · r) ≡ c · s`, so the signature is unchanged;
-    // the multiplier sees `s · r` instead of `s`. `r` never leaves
-    // the function.
+    // Multiplicative DPA blinding: blind s_hat / t0_hat by r_mont and
+    // c_hat by r_inv_mont inside each kappa retry. `(c · r_inv) · (s · r)
+    // ≡ c · s`, so the signature is unchanged; the multiplier sees
+    // `s · r` instead of `s`. `r` never leaves the function. Default
+    // blinds the persistent secrets once here; `lowmem` blinds each row
+    // as it is re-derived in the loop.
     let (r_mont, r_inv_mont) =
         blinding::derive_pair::<P>(&[rnd, b"krabipqc/sign-blind"], Q, Q_N_PRIME, Q_R2_MOD_Q);
-    blinding::scale_polyvec_mont::<P, L>(&mut s1_hat, r_mont, Q, Q_N_PRIME);
-    blinding::scale_polyvec_mont::<P, K>(&mut s2_hat, r_mont, Q, Q_N_PRIME);
-    blinding::scale_polyvec_mont::<P, K>(&mut t0_hat, r_mont, Q, Q_N_PRIME);
+    #[cfg(not(feature = "lowmem"))]
+    {
+        blinding::scale_polyvec_mont::<P, L>(&mut s1_hat, r_mont, Q, Q_N_PRIME);
+        blinding::scale_polyvec_mont::<P, K>(&mut s2_hat, r_mont, Q, Q_N_PRIME);
+        blinding::scale_polyvec_mont::<P, K>(&mut t0_hat, r_mont, Q, Q_N_PRIME);
+    }
 
     let mut mu = Zeroizing::new([0u8; 64]);
     let mut absorb: [&[u8]; MAX_M_PRIME_PIECES + 1] = [&[]; MAX_M_PRIME_PIECES + 1];
@@ -264,8 +272,18 @@ where
 
         let mut z_norm = 0u32;
         for i in 0..L {
-            let mut row: Zeroizing<Poly<u32>> =
-                Zeroizing::new(ntt::mul_ntt::<P>(&s1_hat.v[i], &c_hat));
+            #[cfg(feature = "lowmem")]
+            let s1_hat_i: Zeroizing<Poly<u32>> = {
+                let mut p = Zeroizing::new(sk_reader.s1_row(i)?);
+                ntt::ntt::<P>(&mut p);
+                blinding::scale_mont::<P>(&mut p, r_mont, Q, Q_N_PRIME);
+                p
+            };
+            #[cfg(feature = "lowmem")]
+            let s1_src = &*s1_hat_i;
+            #[cfg(not(feature = "lowmem"))]
+            let s1_src = &s1_hat.v[i];
+            let mut row: Zeroizing<Poly<u32>> = Zeroizing::new(ntt::mul_ntt::<P>(s1_src, &c_hat));
             ntt::inv_ntt::<P>(&mut row);
             for j in 0..N {
                 row.coeffs[j] = pr::add::<u32>(y.v[i].coeffs[j], row.coeffs[j], Q);
@@ -283,8 +301,19 @@ where
         }
 
         for i in 0..K {
+            #[cfg(feature = "lowmem")]
+            let s2_hat_i: Zeroizing<Poly<u32>> = {
+                let mut p = Zeroizing::new(sk_reader.s2_row(i)?);
+                ntt::ntt::<P>(&mut p);
+                blinding::scale_mont::<P>(&mut p, r_mont, Q, Q_N_PRIME);
+                p
+            };
+            #[cfg(feature = "lowmem")]
+            let s2_src = &*s2_hat_i;
+            #[cfg(not(feature = "lowmem"))]
+            let s2_src = &s2_hat.v[i];
             let mut cs2_row: Zeroizing<Poly<u32>> =
-                Zeroizing::new(ntt::mul_ntt::<P>(&s2_hat.v[i], &c_hat));
+                Zeroizing::new(ntt::mul_ntt::<P>(s2_src, &c_hat));
             ntt::inv_ntt::<P>(&mut cs2_row);
             for j in 0..N {
                 w_buf.v[i].coeffs[j] = pr::sub::<u32>(w_buf.v[i].coeffs[j], cs2_row.coeffs[j], Q);
@@ -315,8 +344,19 @@ where
         let mut ct0_norm = 0u32;
         let mut hint_overflow = false;
         for i in 0..K {
+            #[cfg(feature = "lowmem")]
+            let t0_hat_i: Zeroizing<Poly<u32>> = {
+                let mut p = Zeroizing::new(sk_reader.t0_row(i)?);
+                ntt::ntt::<P>(&mut p);
+                blinding::scale_mont::<P>(&mut p, r_mont, Q, Q_N_PRIME);
+                p
+            };
+            #[cfg(feature = "lowmem")]
+            let t0_src = &*t0_hat_i;
+            #[cfg(not(feature = "lowmem"))]
+            let t0_src = &t0_hat.v[i];
             let mut ct0_row: Zeroizing<Poly<u32>> =
-                Zeroizing::new(ntt::mul_ntt::<P>(&t0_hat.v[i], &c_hat));
+                Zeroizing::new(ntt::mul_ntt::<P>(t0_src, &c_hat));
             ntt::inv_ntt::<P>(&mut ct0_row);
             for j in 0..N {
                 let ct0_ij = ct0_row.coeffs[j];

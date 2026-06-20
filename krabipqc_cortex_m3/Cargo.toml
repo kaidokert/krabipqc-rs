@@ -11,6 +11,10 @@ autobenches = false
 # the harness measurement reflects only fixture overhead.
 baseline = []
 
+# Pass-through to krabipqc's lowmem sign trade so the sign stack
+# examples can be measured in both modes.
+lowmem = ["krabipqc/lowmem"]
+
 # This crate is a thumbv7m-only no_std binary harness; the standard
 # `cargo test` workflow doesn't apply.
 [lib]

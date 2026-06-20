@@ -9,6 +9,15 @@ readme = "../README.md"
 keywords = ["crypto", "post-quantum", "ml-dsa", "ml-kem", "no_std"]
 categories = ["cryptography", "no-std", "no-std::no-alloc"]
 
+[features]
+# Stack-for-cycles trade on the ML-DSA sign path. Off: s1_hat / s2_hat
+# / t0_hat persist in NTT+Mont form across the kappa loop (cycle-
+# optimized). On: they stay encoded in `sk`, re-decoded + re-NTT'd one
+# row at a time per retry — saves the three PolyVecs at the cost of
+# repeating that work on every rejection. Pick it only where SRAM is
+# the binding constraint; the cost scales with the retry rate.
+lowmem = []
+
 [dependencies]
 # All Z_q arithmetic flows through modmath.
 modmath = { version = "0.3.1", features = ["wide-mul", "zeroize"] }
