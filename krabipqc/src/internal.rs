@@ -1,12 +1,12 @@
 //! KeyGen_internal / Sign_internal / Verify_internal (FIPS 204 Algs
 //! 6, 7, 8), generic over the parameter set `(K, L)` and the
-//! personality `P` (`Nct` / `Ct`). The `*_impl` variants carry the
-//! generic bodies; the `*_internal` shims pin `P = Nct`.
-//!
-//! Per-set facades live in [`crate::ml_dsa_44`], [`crate::ml_dsa_65`],
-//! [`crate::ml_dsa_87`].
+//! personality `P` (`Nct` / `Ct`). Per-set facades in
+//! [`crate::ml_dsa_44`] / [`crate::ml_dsa_65`] / [`crate::ml_dsa_87`]
+//! instantiate `P = Ct` for KeyGen/Sign and `P = Nct` for Verify —
+//! Verify's inputs are public, so the variable-time REDC finalize
+//! leaks nothing.
 
-use fixed_bigint::{Nct, Personality};
+use fixed_bigint::Personality;
 use zeroize::Zeroizing;
 
 use modmath::basic::pre_reduced as pr;
@@ -91,16 +91,6 @@ where
     shake256(&[pk_out], &mut tr);
     encoding::sk_encode(params, &rho, &big_k, &tr, &s1, &s2, &t0, sk_out)?;
     Ok(())
-}
-
-/// KeyGen_internal (Alg 6), Nct-default shim.
-pub fn keygen_internal<const K: usize, const L: usize>(
-    params: &Params<K, L>,
-    xi: &[u8; 32],
-    pk_out: &mut [u8],
-    sk_out: &mut [u8],
-) -> Result<(), encoding::EncodeError> {
-    keygen_internal_impl::<K, L, Nct>(params, xi, pk_out, sk_out)
 }
 
 /// Sign_internal (FIPS 204 Alg 7), generic over personality `P`.
@@ -353,17 +343,6 @@ where
     }
 }
 
-/// Sign_internal (Alg 7), Nct-default shim.
-pub fn sign_internal<const K: usize, const L: usize>(
-    params: &Params<K, L>,
-    sk: &[u8],
-    m_prime: &[u8],
-    rnd: &[u8; 32],
-    sig_out: &mut [u8],
-) -> Result<(), encoding::EncodeError> {
-    sign_internal_impl::<K, L, Nct>(params, sk, m_prime, rnd, sig_out)
-}
-
 /// Single-slice `M'` shim around [`verify_internal_impl_pieces`].
 pub fn verify_internal_impl<const K: usize, const L: usize, P>(
     params: &Params<K, L>,
@@ -516,21 +495,11 @@ where
     c_tilde == c_tilde_prime
 }
 
-/// Nct shim around [`verify_internal_impl`].
-pub fn verify_internal<const K: usize, const L: usize>(
-    params: &Params<K, L>,
-    pk: &[u8],
-    m_prime: &[u8],
-    sig: &[u8],
-) -> bool {
-    verify_internal_impl::<K, L, Nct>(params, pk, m_prime, sig)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::params::{ML_DSA_44, ML_DSA_65, ML_DSA_87};
-    use fixed_bigint::Ct;
+    use fixed_bigint::{Ct, Nct};
 
     fn message_prime(ctx: &[u8], m: &[u8]) -> Vec<u8> {
         // FIPS 204 §5.2 M': 0x00 || |ctx| || ctx || M.
@@ -547,13 +516,15 @@ mod tests {
         let xi = [0x42u8; 32];
         let mut pk = vec![0u8; params.pk_bytes];
         let mut sk = vec![0u8; params.sk_bytes];
-        keygen_internal(params, &xi, &mut pk, &mut sk).unwrap();
+        keygen_internal_impl::<K, L, Nct>(params, &xi, &mut pk, &mut sk).unwrap();
         let mp = message_prime(b"", b"hello mldsa");
         let mut sig = vec![0u8; params.sig_bytes];
-        sign_internal(params, &sk, &mp, &[0xC3u8; 32], &mut sig).unwrap();
-        assert!(verify_internal(params, &pk, &mp, &sig));
+        sign_internal_impl::<K, L, Nct>(params, &sk, &mp, &[0xC3u8; 32], &mut sig).unwrap();
+        assert!(verify_internal_impl::<K, L, Nct>(params, &pk, &mp, &sig));
         let mp_bad = message_prime(b"", b"different message");
-        assert!(!verify_internal(params, &pk, &mp_bad, &sig));
+        assert!(!verify_internal_impl::<K, L, Nct>(
+            params, &pk, &mp_bad, &sig
+        ));
     }
 
     #[test]
@@ -575,17 +546,22 @@ mod tests {
         let mut sk1 = vec![0u8; ML_DSA_44.sk_bytes];
         let mut pk2 = vec![0u8; ML_DSA_44.pk_bytes];
         let mut sk2 = vec![0u8; ML_DSA_44.sk_bytes];
-        keygen_internal(&ML_DSA_44, &[1u8; 32], &mut pk1, &mut sk1).unwrap();
-        keygen_internal(&ML_DSA_44, &[2u8; 32], &mut pk2, &mut sk2).unwrap();
+        keygen_internal_impl::<4, 4, Nct>(&ML_DSA_44, &[1u8; 32], &mut pk1, &mut sk1).unwrap();
+        keygen_internal_impl::<4, 4, Nct>(&ML_DSA_44, &[2u8; 32], &mut pk2, &mut sk2).unwrap();
         let mp = message_prime(b"", b"msg");
         let mut sig = vec![0u8; ML_DSA_44.sig_bytes];
-        sign_internal(&ML_DSA_44, &sk1, &mp, &[0u8; 32], &mut sig).unwrap();
-        assert!(verify_internal(&ML_DSA_44, &pk1, &mp, &sig));
-        assert!(!verify_internal(&ML_DSA_44, &pk2, &mp, &sig));
+        sign_internal_impl::<4, 4, Nct>(&ML_DSA_44, &sk1, &mp, &[0u8; 32], &mut sig).unwrap();
+        assert!(verify_internal_impl::<4, 4, Nct>(
+            &ML_DSA_44, &pk1, &mp, &sig
+        ));
+        assert!(!verify_internal_impl::<4, 4, Nct>(
+            &ML_DSA_44, &pk2, &mp, &sig
+        ));
     }
 
     /// Same inputs through `Nct` and `Ct` must produce byte-identical
-    /// pk/sk/sig — load-bearing claim for the `*_ct` facades.
+    /// pk/sk/sig — load-bearing for routing Sign through `Ct` and
+    /// Verify through `Nct` without diverging on output bytes.
     fn cross_personality_equiv<const K: usize, const L: usize>(params: &Params<K, L>) {
         let xi = [0x77u8; 32];
         let mut pk_nct = vec![0u8; params.pk_bytes];

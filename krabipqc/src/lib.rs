@@ -31,13 +31,12 @@
 //! a [`rand_core::TryCryptoRng`] so fallible embedded HW RNGs
 //! propagate their error type via [`SignError::Rng`].
 //!
-//! Each per-set facade exposes `*_ct` siblings that route NTT-domain
-//! Mont arithmetic through `wide_montgomery_mul_ct` and use
-//! [`subtle::ConditionallySelectable`] for conditional subtractions,
-//! producing byte-identical pk/sk/sig and accept/reject decisions to
-//! the default path. Time-domain post-processing (rejection samplers,
-//! the `% gamma2` operations) is not yet constant-time — the `_ct`
-//! suffix is a partial guarantee.
+//! KeyGen and Sign route NTT-domain Mont arithmetic through
+//! `wide::ct::mul` ([`subtle::ConditionallySelectable`] for the
+//! conditional subtractions); Verify uses the variable-time finalize
+//! because its inputs are public. Time-domain post-processing
+//! (rejection samplers, the `% gamma2` operations) is not yet
+//! constant-time — the Ct path is a partial guarantee.
 
 pub(crate) mod blinding;
 pub(crate) mod encoding;
