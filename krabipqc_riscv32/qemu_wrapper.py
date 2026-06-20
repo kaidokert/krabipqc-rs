@@ -40,6 +40,7 @@ def main():
     timer.start()
 
     accepted = False
+    metric_seen = False
     try:
         for raw_line in iter(proc.stdout.readline, b""):
             line = raw_line.decode("utf-8", errors="replace").rstrip("\r\n")
@@ -48,7 +49,11 @@ def main():
                 accepted = True
             if " REJECT" in line:
                 accepted = False
-            if line.startswith("METRIC ") or line.startswith("PANIC:"):
+            if line.startswith("METRIC "):
+                metric_seen = True
+                proc.terminate()
+                break
+            if line.startswith("PANIC:"):
                 proc.terminate()
                 break
     finally:
@@ -63,7 +68,7 @@ def main():
         print("TIMEOUT", file=sys.stderr)
         return 1
 
-    return 0 if accepted else 1
+    return 0 if (accepted and metric_seen) else 1
 
 
 if __name__ == "__main__":

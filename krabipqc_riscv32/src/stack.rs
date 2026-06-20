@@ -30,37 +30,37 @@ pub fn check_stack_high_water_mark() -> usize {
 
 pub(crate) fn paint_stack_inner<const SAFE: usize>() {
     unsafe {
-        let bss_end = &_ebss as *const u32 as *mut u8;
-        let safe_stack_end = bss_end.add(SAFE);
+        let bss_end = core::ptr::addr_of!(_ebss) as usize;
+        let safe_stack_end = bss_end.saturating_add(SAFE);
 
         let mut sp: usize;
         core::arch::asm!("mv {}, sp", out(reg) sp, options(nomem, nostack));
-        let live_limit = (sp as *mut u8).sub(SAFE);
+        let live_limit = sp.saturating_sub(SAFE);
 
-        let paint_end = if (live_limit as usize) < (safe_stack_end as usize) {
+        let paint_end = if live_limit < safe_stack_end {
             safe_stack_end
         } else {
             live_limit
         };
 
-        let bytes_to_write = (paint_end as usize).saturating_sub(safe_stack_end as usize);
+        let bytes_to_write = paint_end.saturating_sub(safe_stack_end);
         if bytes_to_write > 0 {
-            core::ptr::write_bytes(safe_stack_end, 0xAA, bytes_to_write);
+            core::ptr::write_bytes(safe_stack_end as *mut u8, 0xAA, bytes_to_write);
         }
     }
 }
 
 pub(crate) fn check_stack_high_water_mark_inner<const SAFE: usize>() -> usize {
     unsafe {
-        let stack_start = &_stack_start as *const u32 as *mut u8;
-        let bss_end = &_ebss as *const u32 as *mut u8;
-        let safe_stack_end = bss_end.add(SAFE);
+        let stack_start = core::ptr::addr_of!(_stack_start) as usize;
+        let bss_end = core::ptr::addr_of!(_ebss) as usize;
+        let safe_stack_end = bss_end.saturating_add(SAFE);
 
-        let mut current = safe_stack_end;
-        while current < stack_start && core::ptr::read_volatile(current) == 0xAA {
-            current = current.add(1);
+        let mut current = safe_stack_end.min(stack_start);
+        while current < stack_start && core::ptr::read_volatile(current as *const u8) == 0xAA {
+            current += 1;
         }
 
-        stack_start.offset_from(current) as usize
+        stack_start.saturating_sub(current)
     }
 }

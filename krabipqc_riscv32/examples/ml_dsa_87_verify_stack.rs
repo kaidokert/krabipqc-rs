@@ -10,8 +10,14 @@ fn verify() -> bool {
     m_prime[0] = 0x00;
     m_prime[1] = 0x00;
     let len = 2 + MESSAGE.len();
-    m_prime[2..len].copy_from_slice(MESSAGE);
-    krabipqc::ml_dsa_87::verify_internal(&PK_87, &m_prime[..len], &SIG_87)
+    let Some(slot) = m_prime.get_mut(2..len) else {
+        return false;
+    };
+    slot.copy_from_slice(MESSAGE);
+    let Some(slice) = m_prime.get(..len) else {
+        return false;
+    };
+    krabipqc::ml_dsa_87::verify_internal(&PK_87, slice, &SIG_87)
 }
 
 #[entry]

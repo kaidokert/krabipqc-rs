@@ -20,7 +20,7 @@ TARGET_LABEL = "RV32"
 # Default group first; lowmem sign variants last so the feature flip
 # triggers at most one extra rebuild.
 EXAMPLES = [
-    ("ml_dsa_44_verify_stack",   "ml_dsa_44_verify_with_stack", "ml-dsa-44 verify",        ()),
+    ("ml_dsa_44_verify_stack",   "ml_dsa_44_verify",            "ml-dsa-44 verify",        ()),
     ("ml_dsa_44_sign_stack",     "ml_dsa_44_sign",              "ml-dsa-44 sign",          ()),
     ("ml_dsa_65_verify_stack",   "ml_dsa_65_verify",            "ml-dsa-65 verify",        ()),
     ("ml_dsa_65_sign_stack",     "ml_dsa_65_sign",              "ml-dsa-65 sign",          ()),
