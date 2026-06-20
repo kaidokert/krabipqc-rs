@@ -1,17 +1,18 @@
 //! Per-parameter-set facades (ML-DSA-44 / 65 / 87) over the generic
 //! [`crate::internal`] keygen / sign / verify functions.
 //!
-//! Each `*_ct` sibling routes NTT-domain Mont arithmetic through
-//! `wide::ct::mul` and yields byte-identical pk/sk/sig and
-//! accept/reject decisions; time-domain post-processing (the
-//! `sample_in_ball` rejection loop and the rounding helpers) is not
-//! yet constant-time, so the `_ct` suffix is a partial guarantee.
+//! KeyGen and Sign run NTT-domain Mont arithmetic through
+//! `wide::ct::mul` (the `Ct` personality); Verify uses `wide::mul`
+//! because its inputs (pk, sig, M) are public and the variable-time
+//! REDC finalize has nothing to leak. Time-domain post-processing
+//! (the `sample_in_ball` rejection loop and the rounding helpers) is
+//! not yet constant-time, so the Ct path is a partial guarantee.
 
 macro_rules! per_set {
     ($mod:ident, $params:ident, $doc:expr) => {
         #[doc = $doc]
         pub mod $mod {
-            use fixed_bigint::Ct;
+            use fixed_bigint::{Ct, Nct};
 
             use core::convert::Infallible;
 
@@ -28,7 +29,7 @@ macro_rules! per_set {
             ) -> Result<([u8; PK_BYTES], [u8; SK_BYTES]), EncodeError> {
                 let mut pk = [0u8; PK_BYTES];
                 let mut sk = [0u8; SK_BYTES];
-                internal::keygen_internal(&$params, xi, &mut pk, &mut sk)?;
+                internal::keygen_internal_impl::<_, _, Ct>(&$params, xi, &mut pk, &mut sk)?;
                 Ok((pk, sk))
             }
 
@@ -38,7 +39,7 @@ macro_rules! per_set {
                 rnd: &[u8; 32],
             ) -> Result<[u8; SIG_BYTES], EncodeError> {
                 let mut sig = [0u8; SIG_BYTES];
-                internal::sign_internal(&$params, sk, m_prime, rnd, &mut sig)?;
+                internal::sign_internal_impl::<_, _, Ct>(&$params, sk, m_prime, rnd, &mut sig)?;
                 Ok(sig)
             }
 
@@ -47,37 +48,7 @@ macro_rules! per_set {
                 m_prime: &[u8],
                 sig: &[u8; SIG_BYTES],
             ) -> bool {
-                internal::verify_internal(&$params, pk, m_prime, sig)
-            }
-
-            /// CT-flavored sibling of [`keygen_internal`].
-            pub fn keygen_internal_ct(
-                xi: &[u8; 32],
-            ) -> Result<([u8; PK_BYTES], [u8; SK_BYTES]), EncodeError> {
-                let mut pk = [0u8; PK_BYTES];
-                let mut sk = [0u8; SK_BYTES];
-                internal::keygen_internal_impl::<_, _, Ct>(&$params, xi, &mut pk, &mut sk)?;
-                Ok((pk, sk))
-            }
-
-            /// CT-flavored sibling of [`sign_internal`].
-            pub fn sign_internal_ct(
-                sk: &[u8; SK_BYTES],
-                m_prime: &[u8],
-                rnd: &[u8; 32],
-            ) -> Result<[u8; SIG_BYTES], EncodeError> {
-                let mut sig = [0u8; SIG_BYTES];
-                internal::sign_internal_impl::<_, _, Ct>(&$params, sk, m_prime, rnd, &mut sig)?;
-                Ok(sig)
-            }
-
-            /// CT-flavored sibling of [`verify_internal`].
-            pub fn verify_internal_ct(
-                pk: &[u8; PK_BYTES],
-                m_prime: &[u8],
-                sig: &[u8; SIG_BYTES],
-            ) -> bool {
-                internal::verify_internal_impl::<_, _, Ct>(&$params, pk, m_prime, sig)
+                internal::verify_internal_impl::<_, _, Nct>(&$params, pk, m_prime, sig)
             }
 
             /// Pure ML-DSA Sign (FIPS 204 §5.2). Builds the message
@@ -88,26 +59,6 @@ macro_rules! per_set {
             /// structurally unreachable for in-tree const-sized inputs
             /// but surfaced rather than panicked.
             pub fn sign(
-                sk: &[u8; SK_BYTES],
-                m: &[u8],
-                ctx: &[u8],
-                rnd: &[u8; 32],
-            ) -> Result<[u8; SIG_BYTES], SignError<Infallible>> {
-                if ctx.len() > 255 {
-                    return Err(SignError::CtxTooLong);
-                }
-                let prefix = [0x00u8];
-                let ctx_len = [ctx.len() as u8];
-                let pieces: &[&[u8]] = &[&prefix, &ctx_len, ctx, m];
-                let mut sig = [0u8; SIG_BYTES];
-                internal::sign_internal_impl_pieces::<_, _, fixed_bigint::Nct>(
-                    &$params, sk, pieces, rnd, &mut sig,
-                )?;
-                Ok(sig)
-            }
-
-            /// CT-flavored sibling of [`sign`].
-            pub fn sign_ct(
                 sk: &[u8; SK_BYTES],
                 m: &[u8],
                 ctx: &[u8],
@@ -144,25 +95,7 @@ macro_rules! per_set {
                 let prefix = [0x00u8];
                 let ctx_len = [ctx.len() as u8];
                 let pieces: &[&[u8]] = &[&prefix, &ctx_len, ctx, m];
-                internal::verify_internal_impl_pieces::<_, _, fixed_bigint::Nct>(
-                    &$params, pk, pieces, sig,
-                )
-            }
-
-            /// CT-flavored pure ML-DSA Verify.
-            pub fn verify_ct(
-                pk: &[u8; PK_BYTES],
-                m: &[u8],
-                ctx: &[u8],
-                sig: &[u8; SIG_BYTES],
-            ) -> bool {
-                if ctx.len() > 255 {
-                    return false;
-                }
-                let prefix = [0x00u8];
-                let ctx_len = [ctx.len() as u8];
-                let pieces: &[&[u8]] = &[&prefix, &ctx_len, ctx, m];
-                internal::verify_internal_impl_pieces::<_, _, Ct>(&$params, pk, pieces, sig)
+                internal::verify_internal_impl_pieces::<_, _, Nct>(&$params, pk, pieces, sig)
             }
 
             /// Pre-hash selector for [`hash_verify`]. Carries the
@@ -216,27 +149,6 @@ macro_rules! per_set {
                 let (oid, digest) = ph_pieces(ph);
                 let pieces: &[&[u8]] = &[&prefix, &ctx_len, ctx, oid, digest];
                 let mut sig = [0u8; SIG_BYTES];
-                internal::sign_internal_impl_pieces::<_, _, fixed_bigint::Nct>(
-                    &$params, sk, pieces, rnd, &mut sig,
-                )?;
-                Ok(sig)
-            }
-
-            /// CT-flavored sibling of [`hash_sign`].
-            pub fn hash_sign_ct(
-                sk: &[u8; SK_BYTES],
-                ph: &PreHash,
-                ctx: &[u8],
-                rnd: &[u8; 32],
-            ) -> Result<[u8; SIG_BYTES], SignError<Infallible>> {
-                if ctx.len() > 255 {
-                    return Err(SignError::CtxTooLong);
-                }
-                let prefix = [0x01u8];
-                let ctx_len = [ctx.len() as u8];
-                let (oid, digest) = ph_pieces(ph);
-                let pieces: &[&[u8]] = &[&prefix, &ctx_len, ctx, oid, digest];
-                let mut sig = [0u8; SIG_BYTES];
                 internal::sign_internal_impl_pieces::<_, _, Ct>(
                     &$params, sk, pieces, rnd, &mut sig,
                 )?;
@@ -259,26 +171,7 @@ macro_rules! per_set {
                 let ctx_len = [ctx.len() as u8];
                 let (oid, digest) = ph_pieces(ph);
                 let pieces: &[&[u8]] = &[&prefix, &ctx_len, ctx, oid, digest];
-                internal::verify_internal_impl_pieces::<_, _, fixed_bigint::Nct>(
-                    &$params, pk, pieces, sig,
-                )
-            }
-
-            /// CT-flavored sibling of [`hash_verify`].
-            pub fn hash_verify_ct(
-                pk: &[u8; PK_BYTES],
-                ph: &PreHash,
-                ctx: &[u8],
-                sig: &[u8; SIG_BYTES],
-            ) -> bool {
-                if ctx.len() > 255 {
-                    return false;
-                }
-                let prefix = [0x01u8];
-                let ctx_len = [ctx.len() as u8];
-                let (oid, digest) = ph_pieces(ph);
-                let pieces: &[&[u8]] = &[&prefix, &ctx_len, ctx, oid, digest];
-                internal::verify_internal_impl_pieces::<_, _, Ct>(&$params, pk, pieces, sig)
+                internal::verify_internal_impl_pieces::<_, _, Nct>(&$params, pk, pieces, sig)
             }
 
             // RNG-driven entry points. `try_fill_bytes` lets HW RNGs
@@ -313,21 +206,6 @@ macro_rules! per_set {
                 sign(sk, m, ctx, &rnd).map_err(lift_sign_err)
             }
 
-            /// CT-flavored sibling of [`sign_random`].
-            pub fn sign_random_ct<R: rand_core::TryCryptoRng + ?Sized>(
-                sk: &[u8; SK_BYTES],
-                m: &[u8],
-                ctx: &[u8],
-                rng: &mut R,
-            ) -> Result<[u8; SIG_BYTES], SignError<R::Error>> {
-                if ctx.len() > 255 {
-                    return Err(SignError::CtxTooLong);
-                }
-                let mut rnd = zeroize::Zeroizing::new([0u8; 32]);
-                rng.try_fill_bytes(&mut *rnd).map_err(SignError::Rng)?;
-                sign_ct(sk, m, ctx, &rnd).map_err(lift_sign_err)
-            }
-
             /// RNG-driven HashML-DSA Sign.
             pub fn hash_sign_random<R: rand_core::TryCryptoRng + ?Sized>(
                 sk: &[u8; SK_BYTES],
@@ -341,21 +219,6 @@ macro_rules! per_set {
                 let mut rnd = zeroize::Zeroizing::new([0u8; 32]);
                 rng.try_fill_bytes(&mut *rnd).map_err(SignError::Rng)?;
                 hash_sign(sk, ph, ctx, &rnd).map_err(lift_sign_err)
-            }
-
-            /// CT-flavored sibling of [`hash_sign_random`].
-            pub fn hash_sign_random_ct<R: rand_core::TryCryptoRng + ?Sized>(
-                sk: &[u8; SK_BYTES],
-                ph: &PreHash,
-                ctx: &[u8],
-                rng: &mut R,
-            ) -> Result<[u8; SIG_BYTES], SignError<R::Error>> {
-                if ctx.len() > 255 {
-                    return Err(SignError::CtxTooLong);
-                }
-                let mut rnd = zeroize::Zeroizing::new([0u8; 32]);
-                rng.try_fill_bytes(&mut *rnd).map_err(SignError::Rng)?;
-                hash_sign_ct(sk, ph, ctx, &rnd).map_err(lift_sign_err)
             }
 
             /// Reshape a non-RNG `SignError<Infallible>` from `sign` /
