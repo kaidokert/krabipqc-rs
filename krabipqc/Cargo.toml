@@ -43,7 +43,7 @@ zeroize = { version = "1", default-features = false }
 rand_core = { version = "0.10", default-features = false }
 
 # DER-encoded OIDs for the FIPS 204 §5.4 HashML-DSA pre-hash selectors.
-const-oid = { version = "0.10", default-features = false }
+const-oid = { version = "0.10", default-features = false, features = ["db"] }
 
 # RustCrypto trait crates (kem::Kem / signature::{Signer, Verifier, ...}).
 # Unconditional: interop with the broader RustCrypto ecosystem is the
