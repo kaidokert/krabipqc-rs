@@ -68,6 +68,12 @@ impl zeroize::Zeroize for KeyGenSeed {
     }
 }
 
+impl Drop for KeyGenSeed {
+    fn drop(&mut self) {
+        zeroize::Zeroize::zeroize(&mut self.0);
+    }
+}
+
 impl From<[u8; 32]> for KeyGenSeed {
     fn from(b: [u8; 32]) -> Self {
         Self(b)
@@ -83,6 +89,12 @@ pub struct SigningRandomness(pub [u8; 32]);
 impl zeroize::Zeroize for SigningRandomness {
     fn zeroize(&mut self) {
         self.0.zeroize();
+    }
+}
+
+impl Drop for SigningRandomness {
+    fn drop(&mut self) {
+        zeroize::Zeroize::zeroize(&mut self.0);
     }
 }
 
