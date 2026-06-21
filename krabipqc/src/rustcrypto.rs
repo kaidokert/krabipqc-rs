@@ -113,7 +113,7 @@ pub trait MlDsaParams:
         msg: &[u8],
         ctx: &[u8],
         rnd: &[u8; 32],
-    ) -> Result<Array<u8, Self::SigSize>, crate::SignError<core::convert::Infallible>>;
+    ) -> Result<Array<u8, Self::SigSize>, crate::MessageError>;
     #[doc(hidden)]
     fn dsa_sign_random<R: TryCryptoRng + ?Sized>(
         sk: &Array<u8, Self::SkSize>,
@@ -278,7 +278,7 @@ impl MlDsaParams for MlDsa44 {
     fn dsa_keygen(
         xi: &[u8; 32],
     ) -> Result<(Array<u8, Self::PkSize>, Array<u8, Self::SkSize>), crate::EncodeError> {
-        let (pk, sk) = crate::ml_dsa_44::keygen_from_seed(xi)?;
+        let (pk, sk) = crate::ml_dsa_44::keygen_from_seed(&crate::KeyGenSeed(*xi))?;
         Ok((Array::from(pk), Array::from(sk)))
     }
     fn dsa_sign(
@@ -286,9 +286,14 @@ impl MlDsaParams for MlDsa44 {
         msg: &[u8],
         ctx: &[u8],
         rnd: &[u8; 32],
-    ) -> Result<Array<u8, Self::SigSize>, crate::SignError<core::convert::Infallible>> {
+    ) -> Result<Array<u8, Self::SigSize>, crate::MessageError> {
         let sk_arr: &[u8; crate::ml_dsa_44::SK_BYTES] = sk.as_ref();
-        Ok(Array::from(crate::ml_dsa_44::sign(sk_arr, msg, ctx, rnd)?))
+        Ok(Array::from(crate::ml_dsa_44::sign(
+            sk_arr,
+            msg,
+            ctx,
+            &crate::SigningRandomness(*rnd),
+        )?))
     }
     fn dsa_sign_random<R: TryCryptoRng + ?Sized>(
         sk: &Array<u8, Self::SkSize>,
@@ -321,7 +326,7 @@ impl MlDsaParams for MlDsa65 {
     fn dsa_keygen(
         xi: &[u8; 32],
     ) -> Result<(Array<u8, Self::PkSize>, Array<u8, Self::SkSize>), crate::EncodeError> {
-        let (pk, sk) = crate::ml_dsa_65::keygen_from_seed(xi)?;
+        let (pk, sk) = crate::ml_dsa_65::keygen_from_seed(&crate::KeyGenSeed(*xi))?;
         Ok((Array::from(pk), Array::from(sk)))
     }
     fn dsa_sign(
@@ -329,9 +334,14 @@ impl MlDsaParams for MlDsa65 {
         msg: &[u8],
         ctx: &[u8],
         rnd: &[u8; 32],
-    ) -> Result<Array<u8, Self::SigSize>, crate::SignError<core::convert::Infallible>> {
+    ) -> Result<Array<u8, Self::SigSize>, crate::MessageError> {
         let sk_arr: &[u8; crate::ml_dsa_65::SK_BYTES] = sk.as_ref();
-        Ok(Array::from(crate::ml_dsa_65::sign(sk_arr, msg, ctx, rnd)?))
+        Ok(Array::from(crate::ml_dsa_65::sign(
+            sk_arr,
+            msg,
+            ctx,
+            &crate::SigningRandomness(*rnd),
+        )?))
     }
     fn dsa_sign_random<R: TryCryptoRng + ?Sized>(
         sk: &Array<u8, Self::SkSize>,
@@ -364,7 +374,7 @@ impl MlDsaParams for MlDsa87 {
     fn dsa_keygen(
         xi: &[u8; 32],
     ) -> Result<(Array<u8, Self::PkSize>, Array<u8, Self::SkSize>), crate::EncodeError> {
-        let (pk, sk) = crate::ml_dsa_87::keygen_from_seed(xi)?;
+        let (pk, sk) = crate::ml_dsa_87::keygen_from_seed(&crate::KeyGenSeed(*xi))?;
         Ok((Array::from(pk), Array::from(sk)))
     }
     fn dsa_sign(
@@ -372,9 +382,14 @@ impl MlDsaParams for MlDsa87 {
         msg: &[u8],
         ctx: &[u8],
         rnd: &[u8; 32],
-    ) -> Result<Array<u8, Self::SigSize>, crate::SignError<core::convert::Infallible>> {
+    ) -> Result<Array<u8, Self::SigSize>, crate::MessageError> {
         let sk_arr: &[u8; crate::ml_dsa_87::SK_BYTES] = sk.as_ref();
-        Ok(Array::from(crate::ml_dsa_87::sign(sk_arr, msg, ctx, rnd)?))
+        Ok(Array::from(crate::ml_dsa_87::sign(
+            sk_arr,
+            msg,
+            ctx,
+            &crate::SigningRandomness(*rnd),
+        )?))
     }
     fn dsa_sign_random<R: TryCryptoRng + ?Sized>(
         sk: &Array<u8, Self::SkSize>,
@@ -464,7 +479,8 @@ impl<P: MlKemParams> Encapsulate for Ek<P> {
     {
         let mut m = Zeroizing::new([0u8; 32]);
         rand_core::Rng::fill_bytes(rng, &mut *m);
-        // TODO: drop .expect — needs const-generic Params buffer sizes + CanonicalEk typestate.
+        // kem_encaps is infallible here: self.ek passed TryKeyInit (modulus check),
+        // and all buffer sizes are pinned by the typenum constants in MlKemParams.
         let (ss_bytes, ct_bytes) = P::kem_encaps(&self.ek, &m)
             .expect("kem_encaps infallible: ek validated at construction, buffers pinned");
         (ct_bytes, ss_bytes)
@@ -501,7 +517,8 @@ impl<P: MlKemParams> Generate for Dk<P> {
         let mut z = Zeroizing::new([0u8; 32]);
         rng.try_fill_bytes(&mut *d)?;
         rng.try_fill_bytes(&mut *z)?;
-        // TODO: drop .expect — trait's R::Error can't carry EncodeError without a breaking where bound.
+        // kem_keygen is infallible on facade-pinned buffer sizes; the trait's R::Error
+        // cannot carry EncodeError, so a breaking where bound would be required to propagate it.
         let (ek_bytes, sk_bytes) =
             P::kem_keygen(&d, &z).expect("kem_keygen infallible on facade-pinned buffer sizes");
         let ek = Ek { ek: ek_bytes };
@@ -641,7 +658,8 @@ impl<P: MlDsaParams> Generate for MlDsaSigner<P> {
     fn try_generate_from_rng<R: TryCryptoRng + ?Sized>(rng: &mut R) -> Result<Self, R::Error> {
         let mut xi = Zeroizing::new([0u8; 32]);
         rng.try_fill_bytes(&mut *xi)?;
-        // TODO: drop .expect — trait's R::Error can't carry EncodeError without a breaking where bound.
+        // dsa_keygen is infallible on facade-pinned buffer sizes; the trait's R::Error
+        // cannot carry EncodeError, so a breaking where bound would be required to propagate it.
         let (pk_bytes, sk_bytes) =
             P::dsa_keygen(&xi).expect("dsa_keygen infallible on facade-pinned buffer sizes");
         Ok(Self {
@@ -812,7 +830,8 @@ mod tests {
     /// Signer::from_keypair and Signer::Debug.
     #[test]
     fn mldsa44_signer_from_keypair_and_debug() {
-        let (pk_bytes, sk_bytes) = crate::ml_dsa_44::keygen_from_seed(&[0x42u8; 32]).unwrap();
+        let (pk_bytes, sk_bytes) =
+            crate::ml_dsa_44::keygen_from_seed(&crate::KeyGenSeed([0x42u8; 32])).unwrap();
         let sk_arr = Array::from(sk_bytes);
         let pk_arr = Array::from(pk_bytes);
         let signer = MlDsaSigner::<MlDsa44>::from_keypair(&sk_arr, &pk_arr);

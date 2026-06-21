@@ -8,7 +8,7 @@
 //! For 44 we keep the seed/pk/sk inline; for 65 and 87 we read three-line
 //! `seed/pk/sk` text files to keep the source file readable.
 
-use krabipqc::{ml_dsa_44, ml_dsa_65, ml_dsa_87};
+use krabipqc::{KeyGenSeed, ml_dsa_44, ml_dsa_65, ml_dsa_87};
 
 fn from_hex(s: &str) -> Vec<u8> {
     let s: String = s.chars().filter(|c| !c.is_whitespace()).collect();
@@ -44,7 +44,7 @@ fn compare(label: &str, got: &[u8], want: &[u8]) {
 fn acvp_ml_dsa_44_keygen_tc1() {
     let text = include_str!("kat_keygen_mldsa44_tc1.txt");
     let (xi, pk_exp, sk_exp) = parse_triple(text);
-    let (pk, sk) = ml_dsa_44::keygen_from_seed(&xi).unwrap();
+    let (pk, sk) = ml_dsa_44::keygen_from_seed(&KeyGenSeed(xi)).unwrap();
     compare("pk", &pk, &pk_exp);
     compare("sk", &sk, &sk_exp);
 }
@@ -53,7 +53,7 @@ fn acvp_ml_dsa_44_keygen_tc1() {
 fn acvp_ml_dsa_65_keygen_tc26() {
     let text = include_str!("kat_keygen_mldsa65_tc26.txt");
     let (xi, pk_exp, sk_exp) = parse_triple(text);
-    let (pk, sk) = ml_dsa_65::keygen_from_seed(&xi).unwrap();
+    let (pk, sk) = ml_dsa_65::keygen_from_seed(&KeyGenSeed(xi)).unwrap();
     compare("pk", &pk, &pk_exp);
     compare("sk", &sk, &sk_exp);
 }
@@ -62,7 +62,7 @@ fn acvp_ml_dsa_65_keygen_tc26() {
 fn acvp_ml_dsa_87_keygen_tc51() {
     let text = include_str!("kat_keygen_mldsa87_tc51.txt");
     let (xi, pk_exp, sk_exp) = parse_triple(text);
-    let (pk, sk) = ml_dsa_87::keygen_from_seed(&xi).unwrap();
+    let (pk, sk) = ml_dsa_87::keygen_from_seed(&KeyGenSeed(xi)).unwrap();
     compare("pk", &pk, &pk_exp);
     compare("sk", &sk, &sk_exp);
 }
