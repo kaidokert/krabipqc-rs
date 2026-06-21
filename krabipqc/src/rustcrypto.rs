@@ -64,24 +64,24 @@ pub trait MlKemParams:
     /// Ciphertext byte length.
     type CtSize: ArraySize + PartialEq + Eq;
 
-    /// Deterministic ML-KEM keygen. Returns `(ek_bytes, dk_bytes)`.
+    #[doc(hidden)]
     fn kem_keygen(
         d: &[u8; 32],
         z: &[u8; 32],
     ) -> Result<(Array<u8, Self::EkSize>, Array<u8, Self::DkSize>), crate::EncodeError>;
-    /// Deterministic ML-KEM encapsulate. Returns `(ss_bytes, ct_bytes)`.
+    #[doc(hidden)]
     fn kem_encaps(
         ek: &Array<u8, Self::EkSize>,
         m: &[u8; 32],
     ) -> Result<(Array<u8, U32>, Array<u8, Self::CtSize>), crate::EncodeError>;
-    /// ML-KEM decapsulate. Returns `ss_bytes`.
+    #[doc(hidden)]
     fn kem_decaps(
         dk: &Array<u8, Self::DkSize>,
         ct: &Array<u8, Self::CtSize>,
     ) -> Result<Array<u8, U32>, crate::EncodeError>;
-    /// FIPS 203 §7.2 modulus check on a candidate encapsulation key.
+    #[doc(hidden)]
     fn kem_ek_validate(ek: &Array<u8, Self::EkSize>) -> Result<(), kem::InvalidKey>;
-    /// Byte offset within the DK blob where the embedded EK bytes begin.
+    #[doc(hidden)]
     fn kem_ek_offset() -> usize;
 }
 
@@ -115,25 +115,25 @@ pub trait MlDsaParams:
     /// Signature byte length.
     type SigSize: ArraySize + PartialEq + Eq;
 
-    /// Deterministic ML-DSA keygen (FIPS 204 Alg 1). Returns `(pk_bytes, sk_bytes)`.
+    #[doc(hidden)]
     fn dsa_keygen(
         xi: &[u8; 32],
     ) -> Result<(Array<u8, Self::PkSize>, Array<u8, Self::SkSize>), crate::EncodeError>;
-    /// Deterministic ML-DSA sign (`ctx = &[]` path).
+    #[doc(hidden)]
     fn dsa_sign(
         sk: &Array<u8, Self::SkSize>,
         msg: &[u8],
         ctx: &[u8],
         rnd: &[u8; 32],
     ) -> Result<Array<u8, Self::SigSize>, crate::SignError<core::convert::Infallible>>;
-    /// Randomized ML-DSA sign.
+    #[doc(hidden)]
     fn dsa_sign_random<R: TryCryptoRng + ?Sized>(
         sk: &Array<u8, Self::SkSize>,
         msg: &[u8],
         ctx: &[u8],
         rng: &mut R,
     ) -> Result<Array<u8, Self::SigSize>, crate::SignError<R::Error>>;
-    /// ML-DSA verify.
+    #[doc(hidden)]
     fn dsa_verify(
         pk: &Array<u8, Self::PkSize>,
         msg: &[u8],
@@ -668,7 +668,7 @@ impl<P: MlDsaParams> RandomizedSigner<MlDsaSignature<P>> for MlDsaSigner<P> {
 impl<P: MlDsaParams> Generate for MlDsaSigner<P> {
     fn try_generate_from_rng<R: TryCryptoRng + ?Sized>(rng: &mut R) -> Result<Self, R::Error> {
         // Same shape as the ML-KEM Dk Generate impl: bypass the facade's
-        // KeyGenError-returning keygen so the structurally-unreachable
+        // RandError-returning keygen so the structurally-unreachable
         // Encode arm doesn't have to squeeze through R::Error.
         let mut xi = Zeroizing::new([0u8; 32]);
         rng.try_fill_bytes(&mut *xi)?;

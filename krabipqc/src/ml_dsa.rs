@@ -18,7 +18,7 @@ macro_rules! per_set {
 
             use crate::internal;
             use crate::params::$params;
-            use crate::{EncodeError, KeyGenError, SignError};
+            use crate::{EncodeError, RandError, SignError};
 
             pub use crate::PreHash;
 
@@ -183,9 +183,9 @@ macro_rules! per_set {
             /// from `rng`; returns `(pk, sk)`.
             pub fn keygen<R: rand_core::TryCryptoRng + ?Sized>(
                 rng: &mut R,
-            ) -> Result<([u8; PK_BYTES], [u8; SK_BYTES]), KeyGenError<R::Error>> {
+            ) -> Result<([u8; PK_BYTES], [u8; SK_BYTES]), RandError<R::Error>> {
                 let mut xi = zeroize::Zeroizing::new([0u8; 32]);
-                rng.try_fill_bytes(&mut *xi).map_err(KeyGenError::Rng)?;
+                rng.try_fill_bytes(&mut *xi).map_err(RandError::Rng)?;
                 Ok(keygen_from_seed(&xi)?)
             }
 

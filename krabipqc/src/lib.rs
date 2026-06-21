@@ -115,34 +115,24 @@ impl<E> From<encoding::EncodeError> for SignError<E> {
     }
 }
 
-/// Error returned by the RNG-wrapped ML-DSA `keygen` entry point on
-/// each per-set facade.
+/// Error returned by the RNG-driven entry points on each per-set facade:
+/// [`ml_dsa_44::keygen`], [`ml_kem_512::keygen`], [`ml_kem_512::encaps`],
+/// and their `-65` / `-87` / `-768` / `-1024` equivalents.
+///
+/// * [`RandError::Rng`] — the RNG returned an error while sampling the
+///   random input. `E` is the RNG's own error type.
+/// * [`RandError::Encode`] — a structural buffer / codec mismatch.
+///   Unreachable in practice once the per-set facade has pinned all
+///   buffer sizes via const generics; surfaced rather than panicked.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
-pub enum KeyGenError<E> {
+pub enum RandError<E> {
     Rng(E),
     Encode(encoding::EncodeError),
 }
 
-impl<E> From<encoding::EncodeError> for KeyGenError<E> {
+impl<E> From<encoding::EncodeError> for RandError<E> {
     fn from(e: encoding::EncodeError) -> Self {
-        KeyGenError::Encode(e)
-    }
-}
-
-/// Error returned by the RNG-wrapped ML-KEM `keygen` / `encaps` entry
-/// points on each per-set facade. `Encode` is a structural shape
-/// mismatch that can only fire on internal misuse (the per-set facade
-/// pins all buffer sizes).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[non_exhaustive]
-pub enum KemError<E> {
-    Rng(E),
-    Encode(encoding::EncodeError),
-}
-
-impl<E> From<encoding::EncodeError> for KemError<E> {
-    fn from(e: encoding::EncodeError) -> Self {
-        KemError::Encode(e)
+        RandError::Encode(e)
     }
 }

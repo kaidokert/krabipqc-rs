@@ -26,7 +26,7 @@ macro_rules! per_set {
 
             use crate::mlkem::kem;
             use crate::mlkem::params::{SS_BYTES, $params};
-            use crate::{EncodeError, KemError};
+            use crate::{EncodeError, RandError};
 
             pub const EK_BYTES: usize = $ek;
             pub const DK_BYTES: usize = $dk;
@@ -75,11 +75,11 @@ macro_rules! per_set {
             /// RNGs that can fail propagate their error.
             pub fn keygen<R: rand_core::TryCryptoRng + ?Sized>(
                 rng: &mut R,
-            ) -> Result<([u8; EK_BYTES], [u8; DK_BYTES]), KemError<R::Error>> {
+            ) -> Result<([u8; EK_BYTES], [u8; DK_BYTES]), RandError<R::Error>> {
                 let mut d = Zeroizing::new([0u8; 32]);
                 let mut z = Zeroizing::new([0u8; 32]);
-                rng.try_fill_bytes(&mut *d).map_err(KemError::Rng)?;
-                rng.try_fill_bytes(&mut *z).map_err(KemError::Rng)?;
+                rng.try_fill_bytes(&mut *d).map_err(RandError::Rng)?;
+                rng.try_fill_bytes(&mut *z).map_err(RandError::Rng)?;
                 Ok(keygen_from_seed(&d, &z)?)
             }
 
@@ -88,9 +88,9 @@ macro_rules! per_set {
             pub fn encaps<R: rand_core::TryCryptoRng + ?Sized>(
                 ek: &[u8; EK_BYTES],
                 rng: &mut R,
-            ) -> Result<([u8; SS_BYTES], [u8; CT_BYTES]), KemError<R::Error>> {
+            ) -> Result<([u8; SS_BYTES], [u8; CT_BYTES]), RandError<R::Error>> {
                 let mut m = Zeroizing::new([0u8; 32]);
-                rng.try_fill_bytes(&mut *m).map_err(KemError::Rng)?;
+                rng.try_fill_bytes(&mut *m).map_err(RandError::Rng)?;
                 Ok(encaps_from_seed(ek, &m)?)
             }
         }
