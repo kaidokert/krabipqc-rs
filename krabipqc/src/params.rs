@@ -31,11 +31,13 @@ pub const D: u32 = 13;
 /// `|x| < 2*q`; all in-tree callers pass `|x| < q`.
 #[inline]
 pub fn from_signed(x: i32, q: u32) -> u32 {
-    let is_neg = Choice::from((x < 0) as u8);
+    // Arithmetic right shift fills with the sign bit; & 1 isolates it.
+    let is_neg = Choice::from(((x >> 31) as u32 & 1) as u8);
     let abs = x.wrapping_abs() as u32;
     let geq_q = Choice::from((((abs.wrapping_sub(q)) >> 31) ^ 1) as u8 & 1);
     let abs_red = u32::conditional_select(&abs, &abs.wrapping_sub(q), geq_q);
-    let is_zero = Choice::from((abs_red == 0) as u8);
+    // x | wrapping_neg(x) has the high bit set for any nonzero x.
+    let is_zero = Choice::from((((abs_red | abs_red.wrapping_neg()) >> 31) ^ 1) as u8);
     let neg_val = u32::conditional_select(&q.wrapping_sub(abs_red), &0u32, is_zero);
     u32::conditional_select(&abs_red, &neg_val, is_neg)
 }

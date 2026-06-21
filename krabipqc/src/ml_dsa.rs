@@ -168,6 +168,9 @@ macro_rules! per_set {
                 ctx: &[u8],
                 rng: &mut R,
             ) -> Result<[u8; SIG_BYTES], SignError<R::Error>> {
+                if ctx.len() > 255 {
+                    return Err(SignError::Message(MessageError::CtxTooLong));
+                }
                 let mut rnd = zeroize::Zeroizing::new(SigningRandomness([0u8; 32]));
                 rng.try_fill_bytes(&mut rnd.0).map_err(SignError::Rng)?;
                 sign(sk, m, ctx, &rnd).map_err(SignError::Message)
@@ -180,6 +183,9 @@ macro_rules! per_set {
                 ctx: &[u8],
                 rng: &mut R,
             ) -> Result<[u8; SIG_BYTES], SignError<R::Error>> {
+                if ctx.len() > 255 {
+                    return Err(SignError::Message(MessageError::CtxTooLong));
+                }
                 let mut rnd = zeroize::Zeroizing::new(SigningRandomness([0u8; 32]));
                 rng.try_fill_bytes(&mut rnd.0).map_err(SignError::Rng)?;
                 hash_sign(sk, ph, ctx, &rnd).map_err(SignError::Message)
