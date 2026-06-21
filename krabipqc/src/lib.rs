@@ -194,45 +194,35 @@ const fn oid_der<const N: usize>(oid: &const_oid::ObjectIdentifier) -> [u8; N] {
 }
 
 impl<'a> PreHash<'a> {
-    // FIPS 204 §5.4 Table 3 — DER-encoded OIDs derived from human-readable arc strings.
-    // Arc strings are cross-checkable against the NIST / IANA OID registry.
-    const DER_SHA256: [u8; 11] = oid_der(&const_oid::ObjectIdentifier::new_unwrap(
+    // FIPS 204 §5.4 Table 3 OIDs in DER form (tag 0x06 + 9-byte arc encoding).
+    // All nine fall under 2.16.840.1.101.3.4.2.{1..12} and have identical arc length.
+    pub const OID_SHA256: &'static [u8] = &oid_der::<11>(&const_oid::ObjectIdentifier::new_unwrap(
         "2.16.840.1.101.3.4.2.1",
     ));
-    const DER_SHA384: [u8; 11] = oid_der(&const_oid::ObjectIdentifier::new_unwrap(
+    pub const OID_SHA384: &'static [u8] = &oid_der::<11>(&const_oid::ObjectIdentifier::new_unwrap(
         "2.16.840.1.101.3.4.2.2",
     ));
-    const DER_SHA512: [u8; 11] = oid_der(&const_oid::ObjectIdentifier::new_unwrap(
+    pub const OID_SHA512: &'static [u8] = &oid_der::<11>(&const_oid::ObjectIdentifier::new_unwrap(
         "2.16.840.1.101.3.4.2.3",
     ));
-    const DER_SHA512_256: [u8; 11] = oid_der(&const_oid::ObjectIdentifier::new_unwrap(
-        "2.16.840.1.101.3.4.2.6",
-    ));
-    const DER_SHA3_256: [u8; 11] = oid_der(&const_oid::ObjectIdentifier::new_unwrap(
-        "2.16.840.1.101.3.4.2.8",
-    ));
-    const DER_SHA3_384: [u8; 11] = oid_der(&const_oid::ObjectIdentifier::new_unwrap(
-        "2.16.840.1.101.3.4.2.9",
-    ));
-    const DER_SHA3_512: [u8; 11] = oid_der(&const_oid::ObjectIdentifier::new_unwrap(
-        "2.16.840.1.101.3.4.2.10",
-    ));
-    const DER_SHAKE128: [u8; 11] = oid_der(&const_oid::ObjectIdentifier::new_unwrap(
-        "2.16.840.1.101.3.4.2.11",
-    ));
-    const DER_SHAKE256: [u8; 11] = oid_der(&const_oid::ObjectIdentifier::new_unwrap(
-        "2.16.840.1.101.3.4.2.12",
-    ));
-
-    pub const OID_SHA256: &'static [u8] = &Self::DER_SHA256;
-    pub const OID_SHA384: &'static [u8] = &Self::DER_SHA384;
-    pub const OID_SHA512: &'static [u8] = &Self::DER_SHA512;
-    pub const OID_SHA512_256: &'static [u8] = &Self::DER_SHA512_256;
-    pub const OID_SHA3_256: &'static [u8] = &Self::DER_SHA3_256;
-    pub const OID_SHA3_384: &'static [u8] = &Self::DER_SHA3_384;
-    pub const OID_SHA3_512: &'static [u8] = &Self::DER_SHA3_512;
-    pub const OID_SHAKE128: &'static [u8] = &Self::DER_SHAKE128;
-    pub const OID_SHAKE256: &'static [u8] = &Self::DER_SHAKE256;
+    pub const OID_SHA512_256: &'static [u8] = &oid_der::<11>(
+        &const_oid::ObjectIdentifier::new_unwrap("2.16.840.1.101.3.4.2.6"),
+    );
+    pub const OID_SHA3_256: &'static [u8] = &oid_der::<11>(
+        &const_oid::ObjectIdentifier::new_unwrap("2.16.840.1.101.3.4.2.8"),
+    );
+    pub const OID_SHA3_384: &'static [u8] = &oid_der::<11>(
+        &const_oid::ObjectIdentifier::new_unwrap("2.16.840.1.101.3.4.2.9"),
+    );
+    pub const OID_SHA3_512: &'static [u8] = &oid_der::<11>(
+        &const_oid::ObjectIdentifier::new_unwrap("2.16.840.1.101.3.4.2.10"),
+    );
+    pub const OID_SHAKE128: &'static [u8] = &oid_der::<11>(
+        &const_oid::ObjectIdentifier::new_unwrap("2.16.840.1.101.3.4.2.11"),
+    );
+    pub const OID_SHAKE256: &'static [u8] = &oid_der::<11>(
+        &const_oid::ObjectIdentifier::new_unwrap("2.16.840.1.101.3.4.2.12"),
+    );
 
     /// Generic constructor for any FIPS 204-approved OID.
     pub const fn new(oid: &'static [u8], digest: &'a [u8]) -> Self {
