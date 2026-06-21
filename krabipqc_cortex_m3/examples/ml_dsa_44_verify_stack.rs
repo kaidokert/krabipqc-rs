@@ -1,22 +1,20 @@
 #![no_main]
 #![no_std]
 
-//! One-shot stack-measuring variant of `ml_dsa_44_verify` -- runs through
-//! the harness's `test_fixture` which paints the stack and reports the
-//! high-water mark. Temporary; underscore-prefixed name flags it as a
-//! README-snapshot helper, not a regular example.
-
 use cortex_m_rt::entry;
+use hybrid_array::Array;
+use kem::KeyInit;
+use krabipqc::{MlDsa44, MlDsaSignature, MlDsaVerifier};
 use krabipqc_cortex_m3::test_fixture;
 use krabipqc_cortex_m3::test_vector::{MESSAGE, PK, SIG};
+use signature::Verifier;
 
 fn verify() -> bool {
-    let mut m_prime = [0u8; 256];
-    m_prime[0] = 0x00;
-    m_prime[1] = 0x00;
-    let len = 2 + MESSAGE.len();
-    m_prime[2..len].copy_from_slice(MESSAGE);
-    krabipqc::ml_dsa_44::verify_internal(&PK, &m_prime[..len], &SIG)
+    let vk = MlDsaVerifier::<MlDsa44>::new(&Array::from(PK));
+    let Ok(sig) = MlDsaSignature::<MlDsa44>::try_from(&SIG[..]) else {
+        return false;
+    };
+    vk.verify(MESSAGE, &sig).is_ok()
 }
 
 #[entry]

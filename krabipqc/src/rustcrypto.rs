@@ -1,27 +1,22 @@
 //! RustCrypto trait impls for ML-KEM and ML-DSA.
 //!
-//! * ML-KEM-{512, 768, 1024} implement [`kem::Kem`] via per-set
-//!   [`MlKem512`] / [`MlKem768`] / [`MlKem1024`] marker types with
-//!   `Dk*` / `Ek*` byte-array wrappers around the FIPS 203 dk / ek
-//!   encodings.
-//! * ML-DSA-{44, 65, 87} implement [`signature::Signer`] /
-//!   [`signature::Verifier`] / [`signature::RandomizedSigner`] /
-//!   [`signature::Keypair`] via per-set `MlDsaN{Signer,Verifier,
-//!   Signature}` wrappers around the FIPS 204 sk / pk / sig
-//!   encodings.
+//! Types are generic over the parameter set via sealed [`MlKemParams`] /
+//! [`MlDsaParams`] traits:
+//!
+//! * ML-KEM: `Dk<P>` / `Ek<P>` with `P` ∈ {[`MlKem512`], [`MlKem768`],
+//!   [`MlKem1024`]}; marker type [`MlKem<P>`] carries the [`kem::Kem`] impl.
+//! * ML-DSA: [`MlDsaSigner<P>`] / [`MlDsaVerifier<P>`] / [`MlDsaSignature<P>`]
+//!   with `P` ∈ {[`MlDsa44`], [`MlDsa65`], [`MlDsa87`]}.
 //!
 //! Trait methods route through the corresponding [`crate::ml_kem_512`] /
-//! [`crate::ml_dsa_44`] / etc. facades. Some kem / signature trait
-//! signatures are infallible (`Decapsulate::decapsulate`,
-//! `Encapsulate::encapsulate_with_rng`, `Generate::try_generate_from_rng`
-//! whose error type is the RNG's, etc.) while the facade returns
-//! `Result<_, EncodeError>` — those crossings document the
-//! structurally-unreachable Encode arm and use `.expect` so a
-//! mismatched const-generic pinning would surface loudly in debug
-//! rather than corrupt silently.
+//! [`crate::ml_dsa_44`] / etc. facades. Infallible trait paths cross a
+//! structurally-unreachable `EncodeError` arm via `.expect` so a
+//! mismatched const-generic pinning surfaces loudly in debug.
 
 use core::fmt;
+use core::marker::PhantomData;
 
+use hybrid_array::ArraySize;
 use kem::common::array::{Array, sizes};
 use kem::common::typenum::{Unsigned, consts::U32};
 use kem::{
@@ -32,384 +27,660 @@ use rand_core::{CryptoRng, TryCryptoRng};
 use zeroize::Zeroizing;
 
 // ============================================================================
-// ML-KEM
+// Sealed trait — prevents external impls of MlKemParams / MlDsaParams
 // ============================================================================
 
-/// Glue from the kem::Kem family of traits to a per-set ML-KEM facade.
-/// Bodies are identical across sets modulo sizes / facade path.
-macro_rules! impl_mlkem_kem {
-    (
-        $kem_marker:ident, $dk_struct:ident, $ek_struct:ident,
-        $ek_size:ident, $dk_size:ident, $ct_size:ident,
-        $facade:ident, $k:literal,
-    ) => {
-        /// Marker type for ML-KEM-N's `kem::Kem` impl. Sk / ek / ct sizes
-        /// live in the associated types.
-        #[derive(Copy, Clone, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
-        pub struct $kem_marker;
-
-        /// Decapsulation key (the secret-side ML-KEM byte-encoded `dk`).
-        /// Caches the embedded ek so `Decapsulator::encapsulation_key`
-        /// returns `&Self::EncapsulationKey` without re-parsing.
-        #[derive(Clone)]
-        pub struct $dk_struct {
-            sk: Zeroizing<Array<u8, sizes::$dk_size>>,
-            ek: $ek_struct,
-        }
-
-        impl $dk_struct {
-            const SK_LEN: usize = <sizes::$dk_size as Unsigned>::USIZE;
-            const EK_LEN: usize = <sizes::$ek_size as Unsigned>::USIZE;
-            const DK_PKE_LEN: usize = Self::SK_LEN - Self::EK_LEN - 32 - 32;
-        }
-
-        impl fmt::Debug for $dk_struct {
-            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-                f.debug_struct(stringify!($dk_struct))
-                    .field("sk", &"<secret>")
-                    .field("ek", &self.ek)
-                    .finish()
-            }
-        }
-
-        /// Encapsulation key (the public-side ML-KEM byte-encoded `ek`).
-        #[derive(Clone, Debug, PartialEq, Eq)]
-        pub struct $ek_struct {
-            ek: Array<u8, sizes::$ek_size>,
-        }
-
-        impl Kem for $kem_marker {
-            type DecapsulationKey = $dk_struct;
-            type EncapsulationKey = $ek_struct;
-            type SharedKeySize = U32;
-            type CiphertextSize = sizes::$ct_size;
-        }
-
-        impl KeySizeUser for $ek_struct {
-            type KeySize = sizes::$ek_size;
-        }
-
-        // No infallible `KeyInit` for the public-side ek: peer-supplied
-        // bytes have to pass the FIPS 203 §7.2 modulus check, so the
-        // only construction path from a `Key` is fallible.
-        impl TryKeyInit for $ek_struct {
-            fn new(key: &Array<u8, sizes::$ek_size>) -> Result<Self, kem::InvalidKey> {
-                let ek_pke = &key[..384 * $k];
-                crate::mlkem::encoding::ek_modulus_check::<$k>(ek_pke)
-                    .map_err(|_| kem::InvalidKey)?;
-                Ok(Self { ek: key.clone() })
-            }
-        }
-
-        impl KeyExport for $ek_struct {
-            fn to_bytes(&self) -> Array<u8, sizes::$ek_size> {
-                self.ek.clone()
-            }
-        }
-
-        impl KeySizeUser for $dk_struct {
-            type KeySize = sizes::$dk_size;
-        }
-
-        // Symmetric with `Ek*::TryKeyInit`: peer-supplied dk bytes embed
-        // an ek that must satisfy the FIPS 203 §7.2 modulus check, else
-        // `Dk::encapsulation_key()` would silently hand out a
-        // non-canonical Ek that the corresponding `Ek::new` would reject.
-        // No infallible `KeyInit` for the same reason — drops the auto
-        // `kem::FromSeed` blanket; deterministic-seed construction goes
-        // through `try_generate_from_rng` or the facade keygen instead.
-        impl TryKeyInit for $dk_struct {
-            fn new(key: &Array<u8, sizes::$dk_size>) -> Result<Self, kem::InvalidKey> {
-                let mut ek_bytes = Array::<u8, sizes::$ek_size>::default();
-                let ek_start = Self::DK_PKE_LEN;
-                let ek_end = ek_start + Self::EK_LEN;
-                ek_bytes.copy_from_slice(&key[ek_start..ek_end]);
-                let ek = <$ek_struct as TryKeyInit>::new(&ek_bytes)?;
-                Ok(Self {
-                    sk: Zeroizing::new(key.clone()),
-                    ek,
-                })
-            }
-        }
-
-        impl Generate for $dk_struct {
-            fn try_generate_from_rng<R: TryCryptoRng + ?Sized>(
-                rng: &mut R,
-            ) -> Result<Self, R::Error> {
-                // The trait error type is fixed to R::Error, but our
-                // facade keygen returns KemError<R::Error>. Draw the
-                // seeds locally so any structurally-unreachable Encode
-                // arm from keygen_from_seed stays out of the trait's
-                // error channel.
-                let mut d = Zeroizing::new([0u8; 32]);
-                let mut z = Zeroizing::new([0u8; 32]);
-                rng.try_fill_bytes(&mut *d)?;
-                rng.try_fill_bytes(&mut *z)?;
-                // TODO: drop .expect — trait's R::Error can't carry EncodeError without a breaking where bound.
-                let (ek_bytes, sk_bytes) = crate::$facade::keygen_from_seed(&d, &z)
-                    .expect("keygen_from_seed infallible on facade-pinned buffer sizes");
-                let ek = $ek_struct {
-                    ek: Array::from(ek_bytes),
-                };
-                let sk = Zeroizing::new(Array::from(sk_bytes));
-                Ok(Self { sk, ek })
-            }
-        }
-
-        impl Decapsulator for $dk_struct {
-            type Kem = $kem_marker;
-
-            fn encapsulation_key(&self) -> &$ek_struct {
-                &self.ek
-            }
-        }
-
-        // Only `TryDecapsulate` (not the infallible `Decapsulate`) so the
-        // facade's structural EncodeError surfaces as an Err instead of
-        // panicking. Callers reach for `try_decapsulate` directly.
-        impl TryDecapsulate for $dk_struct {
-            type Error = crate::EncodeError;
-
-            fn try_decapsulate(
-                &self,
-                ct: &Array<u8, sizes::$ct_size>,
-            ) -> Result<Array<u8, U32>, Self::Error> {
-                let sk_arr: &[u8; crate::$facade::DK_BYTES] = (&*self.sk).as_ref();
-                let ct_arr: &[u8; crate::$facade::CT_BYTES] = ct.as_ref();
-                let ss = crate::$facade::decaps(sk_arr, ct_arr)?;
-                Ok(Array::from(ss))
-            }
-        }
-
-        impl Encapsulate for $ek_struct {
-            type Kem = $kem_marker;
-
-            fn encapsulate_with_rng<R>(
-                &self,
-                rng: &mut R,
-            ) -> (Array<u8, sizes::$ct_size>, Array<u8, U32>)
-            where
-                R: CryptoRng + ?Sized,
-            {
-                let ek_arr: &[u8; crate::$facade::EK_BYTES] = self.ek.as_ref();
-                let mut m = Zeroizing::new([0u8; 32]);
-                rand_core::Rng::fill_bytes(rng, &mut *m);
-                // TODO: drop .expect — needs const-generic Params buffer sizes + CanonicalEk typestate.
-                let (ss_bytes, ct_bytes) = crate::$facade::encaps_from_seed(ek_arr, &m)
-                    .expect("encaps_from_seed infallible: ek validated, buffers pinned");
-                (Array::from(ct_bytes), Array::from(ss_bytes))
-            }
-        }
-    };
+mod private {
+    pub trait Sealed {}
 }
 
-impl_mlkem_kem!(MlKem512, Dk512, Ek512, U800, U1632, U768, ml_kem_512, 2,);
-impl_mlkem_kem!(MlKem768, Dk768, Ek768, U1184, U2400, U1088, ml_kem_768, 3,);
-impl_mlkem_kem!(
-    MlKem1024,
-    Dk1024,
-    Ek1024,
-    U1568,
-    U3168,
-    U1568,
-    ml_kem_1024,
-    4,
-);
-
 // ============================================================================
-// ML-DSA
+// ML-KEM parameter trait
 // ============================================================================
 
-use signature::{Error as SigError, Keypair, RandomizedSigner, Signer, Verifier};
+/// Sealed trait implemented by the ML-KEM parameter-set marker types
+/// ([`MlKem512`], [`MlKem768`], [`MlKem1024`]). Carries the associated buffer
+/// sizes and dispatches to the FIPS 203 facade.
+#[allow(clippy::type_complexity)]
+pub trait MlKemParams:
+    private::Sealed
+    + Copy
+    + Clone
+    + fmt::Debug
+    + Default
+    + PartialEq
+    + Eq
+    + PartialOrd
+    + Ord
+    + Send
+    + Sync
+    + Sized
+    + 'static
+{
+    /// Encapsulation-key byte length.
+    type EkSize: ArraySize + PartialEq + Eq;
+    /// Decapsulation-key byte length.
+    type DkSize: ArraySize + PartialEq + Eq;
+    /// Ciphertext byte length.
+    type CtSize: ArraySize + PartialEq + Eq;
 
-/// Glue from the signature::{Signer, Verifier, RandomizedSigner,
-/// Keypair} family to a per-set ML-DSA facade. The RustCrypto traits
-/// don't model ctx-string signing, so the impls below always pass
-/// `ctx = []`. Callers needing non-empty ctx or HashML-DSA should
-/// reach the facade fns directly.
-macro_rules! impl_mldsa_sig {
-    (
-        $signer:ident, $verifier:ident, $sig:ident,
-        $pk_size:ident, $sk_size:ident, $sig_size:ident,
-        $facade:ident,
-    ) => {
-        /// Byte-encoded ML-DSA signature wrapper.
-        #[derive(Clone, Debug, PartialEq, Eq)]
-        pub struct $sig(Array<u8, sizes::$sig_size>);
-
-        impl AsRef<[u8]> for $sig {
-            fn as_ref(&self) -> &[u8] {
-                &self.0
-            }
-        }
-
-        impl From<Array<u8, sizes::$sig_size>> for $sig {
-            fn from(a: Array<u8, sizes::$sig_size>) -> Self {
-                Self(a)
-            }
-        }
-
-        impl TryFrom<&[u8]> for $sig {
-            type Error = SigError;
-            fn try_from(bytes: &[u8]) -> Result<Self, SigError> {
-                Array::try_from(bytes)
-                    .map(Self)
-                    .map_err(|_| SigError::new())
-            }
-        }
-
-        /// Verifier (public key holder) for ML-DSA-N.
-        #[derive(Clone, Debug, PartialEq, Eq)]
-        pub struct $verifier {
-            pk: Array<u8, sizes::$pk_size>,
-        }
-
-        impl KeySizeUser for $verifier {
-            type KeySize = sizes::$pk_size;
-        }
-
-        impl KeyInit for $verifier {
-            fn new(key: &Array<u8, sizes::$pk_size>) -> Self {
-                Self { pk: key.clone() }
-            }
-        }
-
-        impl KeyExport for $verifier {
-            fn to_bytes(&self) -> Array<u8, sizes::$pk_size> {
-                self.pk.clone()
-            }
-        }
-
-        impl Verifier<$sig> for $verifier {
-            fn verify(&self, msg: &[u8], signature: &$sig) -> Result<(), SigError> {
-                let pk_arr: &[u8; crate::$facade::PK_BYTES] = self.pk.as_ref();
-                let sig_arr: &[u8; crate::$facade::SIG_BYTES] = signature.0.as_ref();
-                if crate::$facade::verify(pk_arr, msg, &[], sig_arr) {
-                    Ok(())
-                } else {
-                    Err(SigError::new())
-                }
-            }
-        }
-
-        /// Signer (secret key holder) for ML-DSA-N. Caches the
-        /// verifying key alongside the sk so `Keypair::verifying_key`
-        /// doesn't have to re-derive it.
-        #[derive(Clone)]
-        pub struct $signer {
-            sk: Zeroizing<Array<u8, sizes::$sk_size>>,
-            vk: $verifier,
-        }
-
-        impl fmt::Debug for $signer {
-            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-                f.debug_struct(stringify!($signer))
-                    .field("sk", &"<secret>")
-                    .field("vk", &self.vk)
-                    .finish()
-            }
-        }
-
-        impl $signer {
-            /// Build a Signer from the byte-encoded (sk, pk) pair.
-            /// FIPS 204 sk does not contain the literal pk bytes, so
-            /// the caller has to supply both halves; this is the
-            /// natural counterpart to `keygen` which returns them
-            /// together.
-            pub fn from_keypair(
-                sk: &Array<u8, sizes::$sk_size>,
-                pk: &Array<u8, sizes::$pk_size>,
-            ) -> Self {
-                Self {
-                    sk: Zeroizing::new(sk.clone()),
-                    vk: $verifier { pk: pk.clone() },
-                }
-            }
-        }
-
-        impl Keypair for $signer {
-            type VerifyingKey = $verifier;
-            fn verifying_key(&self) -> Self::VerifyingKey {
-                self.vk.clone()
-            }
-        }
-
-        impl Signer<$sig> for $signer {
-            fn try_sign(&self, msg: &[u8]) -> Result<$sig, SigError> {
-                let sk_arr: &[u8; crate::$facade::SK_BYTES] = (&*self.sk).as_ref();
-                let rnd = [0u8; 32]; // deterministic; ctx = empty
-                let bytes =
-                    crate::$facade::sign(sk_arr, msg, &[], &rnd).map_err(|_| SigError::new())?;
-                Ok($sig(Array::from(bytes)))
-            }
-        }
-
-        impl RandomizedSigner<$sig> for $signer {
-            fn try_sign_with_rng<R: TryCryptoRng + ?Sized>(
-                &self,
-                rng: &mut R,
-                msg: &[u8],
-            ) -> Result<$sig, SigError> {
-                let sk_arr: &[u8; crate::$facade::SK_BYTES] = (&*self.sk).as_ref();
-                let bytes = crate::$facade::sign_random(sk_arr, msg, &[], rng)
-                    .map_err(|_| SigError::new())?;
-                Ok($sig(Array::from(bytes)))
-            }
-        }
-
-        impl Generate for $signer {
-            fn try_generate_from_rng<R: TryCryptoRng + ?Sized>(
-                rng: &mut R,
-            ) -> Result<Self, R::Error> {
-                // Same shape as the ML-KEM Dk Generate impl: bypass
-                // the facade's KeyGenError-returning keygen so the
-                // structurally-unreachable Encode arm doesn't have to
-                // squeeze through R::Error.
-                let mut xi = Zeroizing::new([0u8; 32]);
-                rng.try_fill_bytes(&mut *xi)?;
-                // TODO: drop .expect — trait's R::Error can't carry EncodeError without a breaking where bound.
-                let (pk_bytes, sk_bytes) = crate::$facade::keygen_from_seed(&xi)
-                    .expect("keygen_from_seed infallible on facade-pinned buffer sizes");
-                Ok(Self {
-                    sk: Zeroizing::new(Array::from(sk_bytes)),
-                    vk: $verifier {
-                        pk: Array::from(pk_bytes),
-                    },
-                })
-            }
-        }
-    };
+    #[doc(hidden)]
+    fn kem_keygen(
+        d: &[u8; 32],
+        z: &[u8; 32],
+    ) -> Result<(Array<u8, Self::EkSize>, Array<u8, Self::DkSize>), crate::EncodeError>;
+    #[doc(hidden)]
+    fn kem_encaps(
+        ek: &Array<u8, Self::EkSize>,
+        m: &[u8; 32],
+    ) -> Result<(Array<u8, U32>, Array<u8, Self::CtSize>), crate::EncodeError>;
+    #[doc(hidden)]
+    fn kem_decaps(
+        dk: &Array<u8, Self::DkSize>,
+        ct: &Array<u8, Self::CtSize>,
+    ) -> Result<Array<u8, U32>, crate::EncodeError>;
+    #[doc(hidden)]
+    fn kem_ek_validate(ek: &Array<u8, Self::EkSize>) -> Result<(), kem::InvalidKey>;
+    #[doc(hidden)]
+    fn kem_ek_offset() -> usize;
 }
 
-impl_mldsa_sig!(
-    MlDsa44Signer,
-    MlDsa44Verifier,
-    MlDsa44Signature,
-    U1312,
-    U2560,
-    U2420,
-    ml_dsa_44,
-);
+// ============================================================================
+// ML-DSA parameter trait
+// ============================================================================
 
-impl_mldsa_sig!(
-    MlDsa65Signer,
-    MlDsa65Verifier,
-    MlDsa65Signature,
-    U1952,
-    U4032,
-    U3309,
-    ml_dsa_65,
-);
+/// Sealed trait implemented by the ML-DSA parameter-set marker types
+/// ([`MlDsa44`], [`MlDsa65`], [`MlDsa87`]). Carries the associated buffer
+/// sizes and dispatches to the FIPS 204 facade.
+#[allow(clippy::type_complexity)]
+pub trait MlDsaParams:
+    private::Sealed
+    + Copy
+    + Clone
+    + fmt::Debug
+    + Default
+    + PartialEq
+    + Eq
+    + PartialOrd
+    + Ord
+    + Send
+    + Sync
+    + Sized
+    + 'static
+{
+    /// Public-key byte length.
+    type PkSize: ArraySize + PartialEq + Eq;
+    /// Secret-key byte length.
+    type SkSize: ArraySize + PartialEq + Eq;
+    /// Signature byte length.
+    type SigSize: ArraySize + PartialEq + Eq;
 
-impl_mldsa_sig!(
-    MlDsa87Signer,
-    MlDsa87Verifier,
-    MlDsa87Signature,
-    U2592,
-    U4896,
-    U4627,
-    ml_dsa_87,
-);
+    #[doc(hidden)]
+    fn dsa_keygen(
+        xi: &[u8; 32],
+    ) -> Result<(Array<u8, Self::PkSize>, Array<u8, Self::SkSize>), crate::EncodeError>;
+    #[doc(hidden)]
+    fn dsa_sign(
+        sk: &Array<u8, Self::SkSize>,
+        msg: &[u8],
+        ctx: &[u8],
+        rnd: &[u8; 32],
+    ) -> Result<Array<u8, Self::SigSize>, crate::SignError<core::convert::Infallible>>;
+    #[doc(hidden)]
+    fn dsa_sign_random<R: TryCryptoRng + ?Sized>(
+        sk: &Array<u8, Self::SkSize>,
+        msg: &[u8],
+        ctx: &[u8],
+        rng: &mut R,
+    ) -> Result<Array<u8, Self::SigSize>, crate::SignError<R::Error>>;
+    #[doc(hidden)]
+    fn dsa_verify(
+        pk: &Array<u8, Self::PkSize>,
+        msg: &[u8],
+        ctx: &[u8],
+        sig: &Array<u8, Self::SigSize>,
+    ) -> bool;
+}
+
+// ============================================================================
+// ML-KEM parameter-set marker types + impls
+// ============================================================================
+
+/// Parameter-set marker for ML-KEM-512 (`k = 2`).
+#[derive(Copy, Clone, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
+pub struct MlKem512;
+
+/// Parameter-set marker for ML-KEM-768 (`k = 3`).
+#[derive(Copy, Clone, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
+pub struct MlKem768;
+
+/// Parameter-set marker for ML-KEM-1024 (`k = 4`).
+#[derive(Copy, Clone, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
+pub struct MlKem1024;
+
+impl private::Sealed for MlKem512 {}
+impl private::Sealed for MlKem768 {}
+impl private::Sealed for MlKem1024 {}
+
+impl MlKemParams for MlKem512 {
+    type EkSize = sizes::U800;
+    type DkSize = sizes::U1632;
+    type CtSize = sizes::U768;
+
+    fn kem_keygen(
+        d: &[u8; 32],
+        z: &[u8; 32],
+    ) -> Result<(Array<u8, Self::EkSize>, Array<u8, Self::DkSize>), crate::EncodeError> {
+        let (ek, dk) = crate::ml_kem_512::keygen_from_seed(d, z)?;
+        Ok((Array::from(ek), Array::from(dk)))
+    }
+    fn kem_encaps(
+        ek: &Array<u8, Self::EkSize>,
+        m: &[u8; 32],
+    ) -> Result<(Array<u8, U32>, Array<u8, Self::CtSize>), crate::EncodeError> {
+        let ek_arr: &[u8; crate::ml_kem_512::EK_BYTES] = ek.as_ref();
+        let (ss, ct) = crate::ml_kem_512::encaps_from_seed(ek_arr, m)?;
+        Ok((Array::from(ss), Array::from(ct)))
+    }
+    fn kem_decaps(
+        dk: &Array<u8, Self::DkSize>,
+        ct: &Array<u8, Self::CtSize>,
+    ) -> Result<Array<u8, U32>, crate::EncodeError> {
+        let dk_arr: &[u8; crate::ml_kem_512::DK_BYTES] = dk.as_ref();
+        let ct_arr: &[u8; crate::ml_kem_512::CT_BYTES] = ct.as_ref();
+        Ok(Array::from(crate::ml_kem_512::decaps(dk_arr, ct_arr)?))
+    }
+    fn kem_ek_validate(ek: &Array<u8, Self::EkSize>) -> Result<(), kem::InvalidKey> {
+        crate::mlkem::encoding::ek_modulus_check::<2>(&ek[..384 * 2]).map_err(|_| kem::InvalidKey)
+    }
+    fn kem_ek_offset() -> usize {
+        768
+    }
+}
+
+impl MlKemParams for MlKem768 {
+    type EkSize = sizes::U1184;
+    type DkSize = sizes::U2400;
+    type CtSize = sizes::U1088;
+
+    fn kem_keygen(
+        d: &[u8; 32],
+        z: &[u8; 32],
+    ) -> Result<(Array<u8, Self::EkSize>, Array<u8, Self::DkSize>), crate::EncodeError> {
+        let (ek, dk) = crate::ml_kem_768::keygen_from_seed(d, z)?;
+        Ok((Array::from(ek), Array::from(dk)))
+    }
+    fn kem_encaps(
+        ek: &Array<u8, Self::EkSize>,
+        m: &[u8; 32],
+    ) -> Result<(Array<u8, U32>, Array<u8, Self::CtSize>), crate::EncodeError> {
+        let ek_arr: &[u8; crate::ml_kem_768::EK_BYTES] = ek.as_ref();
+        let (ss, ct) = crate::ml_kem_768::encaps_from_seed(ek_arr, m)?;
+        Ok((Array::from(ss), Array::from(ct)))
+    }
+    fn kem_decaps(
+        dk: &Array<u8, Self::DkSize>,
+        ct: &Array<u8, Self::CtSize>,
+    ) -> Result<Array<u8, U32>, crate::EncodeError> {
+        let dk_arr: &[u8; crate::ml_kem_768::DK_BYTES] = dk.as_ref();
+        let ct_arr: &[u8; crate::ml_kem_768::CT_BYTES] = ct.as_ref();
+        Ok(Array::from(crate::ml_kem_768::decaps(dk_arr, ct_arr)?))
+    }
+    fn kem_ek_validate(ek: &Array<u8, Self::EkSize>) -> Result<(), kem::InvalidKey> {
+        crate::mlkem::encoding::ek_modulus_check::<3>(&ek[..384 * 3]).map_err(|_| kem::InvalidKey)
+    }
+    fn kem_ek_offset() -> usize {
+        1152
+    }
+}
+
+impl MlKemParams for MlKem1024 {
+    type EkSize = sizes::U1568;
+    type DkSize = sizes::U3168;
+    type CtSize = sizes::U1568;
+
+    fn kem_keygen(
+        d: &[u8; 32],
+        z: &[u8; 32],
+    ) -> Result<(Array<u8, Self::EkSize>, Array<u8, Self::DkSize>), crate::EncodeError> {
+        let (ek, dk) = crate::ml_kem_1024::keygen_from_seed(d, z)?;
+        Ok((Array::from(ek), Array::from(dk)))
+    }
+    fn kem_encaps(
+        ek: &Array<u8, Self::EkSize>,
+        m: &[u8; 32],
+    ) -> Result<(Array<u8, U32>, Array<u8, Self::CtSize>), crate::EncodeError> {
+        let ek_arr: &[u8; crate::ml_kem_1024::EK_BYTES] = ek.as_ref();
+        let (ss, ct) = crate::ml_kem_1024::encaps_from_seed(ek_arr, m)?;
+        Ok((Array::from(ss), Array::from(ct)))
+    }
+    fn kem_decaps(
+        dk: &Array<u8, Self::DkSize>,
+        ct: &Array<u8, Self::CtSize>,
+    ) -> Result<Array<u8, U32>, crate::EncodeError> {
+        let dk_arr: &[u8; crate::ml_kem_1024::DK_BYTES] = dk.as_ref();
+        let ct_arr: &[u8; crate::ml_kem_1024::CT_BYTES] = ct.as_ref();
+        Ok(Array::from(crate::ml_kem_1024::decaps(dk_arr, ct_arr)?))
+    }
+    fn kem_ek_validate(ek: &Array<u8, Self::EkSize>) -> Result<(), kem::InvalidKey> {
+        crate::mlkem::encoding::ek_modulus_check::<4>(&ek[..384 * 4]).map_err(|_| kem::InvalidKey)
+    }
+    fn kem_ek_offset() -> usize {
+        1536
+    }
+}
+
+// ============================================================================
+// ML-DSA parameter-set marker types + impls
+// ============================================================================
+
+/// Parameter-set marker for ML-DSA-44 (`k = 4`, `l = 4`).
+#[derive(Copy, Clone, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
+pub struct MlDsa44;
+
+/// Parameter-set marker for ML-DSA-65 (`k = 6`, `l = 5`).
+#[derive(Copy, Clone, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
+pub struct MlDsa65;
+
+/// Parameter-set marker for ML-DSA-87 (`k = 8`, `l = 7`).
+#[derive(Copy, Clone, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
+pub struct MlDsa87;
+
+impl private::Sealed for MlDsa44 {}
+impl private::Sealed for MlDsa65 {}
+impl private::Sealed for MlDsa87 {}
+
+impl MlDsaParams for MlDsa44 {
+    type PkSize = sizes::U1312;
+    type SkSize = sizes::U2560;
+    type SigSize = sizes::U2420;
+
+    fn dsa_keygen(
+        xi: &[u8; 32],
+    ) -> Result<(Array<u8, Self::PkSize>, Array<u8, Self::SkSize>), crate::EncodeError> {
+        let (pk, sk) = crate::ml_dsa_44::keygen_from_seed(xi)?;
+        Ok((Array::from(pk), Array::from(sk)))
+    }
+    fn dsa_sign(
+        sk: &Array<u8, Self::SkSize>,
+        msg: &[u8],
+        ctx: &[u8],
+        rnd: &[u8; 32],
+    ) -> Result<Array<u8, Self::SigSize>, crate::SignError<core::convert::Infallible>> {
+        let sk_arr: &[u8; crate::ml_dsa_44::SK_BYTES] = sk.as_ref();
+        Ok(Array::from(crate::ml_dsa_44::sign(sk_arr, msg, ctx, rnd)?))
+    }
+    fn dsa_sign_random<R: TryCryptoRng + ?Sized>(
+        sk: &Array<u8, Self::SkSize>,
+        msg: &[u8],
+        ctx: &[u8],
+        rng: &mut R,
+    ) -> Result<Array<u8, Self::SigSize>, crate::SignError<R::Error>> {
+        let sk_arr: &[u8; crate::ml_dsa_44::SK_BYTES] = sk.as_ref();
+        Ok(Array::from(crate::ml_dsa_44::sign_random(
+            sk_arr, msg, ctx, rng,
+        )?))
+    }
+    fn dsa_verify(
+        pk: &Array<u8, Self::PkSize>,
+        msg: &[u8],
+        ctx: &[u8],
+        sig: &Array<u8, Self::SigSize>,
+    ) -> bool {
+        let pk_arr: &[u8; crate::ml_dsa_44::PK_BYTES] = pk.as_ref();
+        let sig_arr: &[u8; crate::ml_dsa_44::SIG_BYTES] = sig.as_ref();
+        crate::ml_dsa_44::verify(pk_arr, msg, ctx, sig_arr)
+    }
+}
+
+impl MlDsaParams for MlDsa65 {
+    type PkSize = sizes::U1952;
+    type SkSize = sizes::U4032;
+    type SigSize = sizes::U3309;
+
+    fn dsa_keygen(
+        xi: &[u8; 32],
+    ) -> Result<(Array<u8, Self::PkSize>, Array<u8, Self::SkSize>), crate::EncodeError> {
+        let (pk, sk) = crate::ml_dsa_65::keygen_from_seed(xi)?;
+        Ok((Array::from(pk), Array::from(sk)))
+    }
+    fn dsa_sign(
+        sk: &Array<u8, Self::SkSize>,
+        msg: &[u8],
+        ctx: &[u8],
+        rnd: &[u8; 32],
+    ) -> Result<Array<u8, Self::SigSize>, crate::SignError<core::convert::Infallible>> {
+        let sk_arr: &[u8; crate::ml_dsa_65::SK_BYTES] = sk.as_ref();
+        Ok(Array::from(crate::ml_dsa_65::sign(sk_arr, msg, ctx, rnd)?))
+    }
+    fn dsa_sign_random<R: TryCryptoRng + ?Sized>(
+        sk: &Array<u8, Self::SkSize>,
+        msg: &[u8],
+        ctx: &[u8],
+        rng: &mut R,
+    ) -> Result<Array<u8, Self::SigSize>, crate::SignError<R::Error>> {
+        let sk_arr: &[u8; crate::ml_dsa_65::SK_BYTES] = sk.as_ref();
+        Ok(Array::from(crate::ml_dsa_65::sign_random(
+            sk_arr, msg, ctx, rng,
+        )?))
+    }
+    fn dsa_verify(
+        pk: &Array<u8, Self::PkSize>,
+        msg: &[u8],
+        ctx: &[u8],
+        sig: &Array<u8, Self::SigSize>,
+    ) -> bool {
+        let pk_arr: &[u8; crate::ml_dsa_65::PK_BYTES] = pk.as_ref();
+        let sig_arr: &[u8; crate::ml_dsa_65::SIG_BYTES] = sig.as_ref();
+        crate::ml_dsa_65::verify(pk_arr, msg, ctx, sig_arr)
+    }
+}
+
+impl MlDsaParams for MlDsa87 {
+    type PkSize = sizes::U2592;
+    type SkSize = sizes::U4896;
+    type SigSize = sizes::U4627;
+
+    fn dsa_keygen(
+        xi: &[u8; 32],
+    ) -> Result<(Array<u8, Self::PkSize>, Array<u8, Self::SkSize>), crate::EncodeError> {
+        let (pk, sk) = crate::ml_dsa_87::keygen_from_seed(xi)?;
+        Ok((Array::from(pk), Array::from(sk)))
+    }
+    fn dsa_sign(
+        sk: &Array<u8, Self::SkSize>,
+        msg: &[u8],
+        ctx: &[u8],
+        rnd: &[u8; 32],
+    ) -> Result<Array<u8, Self::SigSize>, crate::SignError<core::convert::Infallible>> {
+        let sk_arr: &[u8; crate::ml_dsa_87::SK_BYTES] = sk.as_ref();
+        Ok(Array::from(crate::ml_dsa_87::sign(sk_arr, msg, ctx, rnd)?))
+    }
+    fn dsa_sign_random<R: TryCryptoRng + ?Sized>(
+        sk: &Array<u8, Self::SkSize>,
+        msg: &[u8],
+        ctx: &[u8],
+        rng: &mut R,
+    ) -> Result<Array<u8, Self::SigSize>, crate::SignError<R::Error>> {
+        let sk_arr: &[u8; crate::ml_dsa_87::SK_BYTES] = sk.as_ref();
+        Ok(Array::from(crate::ml_dsa_87::sign_random(
+            sk_arr, msg, ctx, rng,
+        )?))
+    }
+    fn dsa_verify(
+        pk: &Array<u8, Self::PkSize>,
+        msg: &[u8],
+        ctx: &[u8],
+        sig: &Array<u8, Self::SigSize>,
+    ) -> bool {
+        let pk_arr: &[u8; crate::ml_dsa_87::PK_BYTES] = pk.as_ref();
+        let sig_arr: &[u8; crate::ml_dsa_87::SIG_BYTES] = sig.as_ref();
+        crate::ml_dsa_87::verify(pk_arr, msg, ctx, sig_arr)
+    }
+}
+
+// ============================================================================
+// ML-KEM generic types
+// ============================================================================
+
+/// `kem::Kem` marker for ML-KEM. Use `MlKem<MlKem512>` etc. in generic
+/// contexts that require a `K: Kem` bound. For direct key construction,
+/// `Dk<MlKem512>::try_generate_from_rng` is more ergonomic.
+#[derive(Copy, Clone, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
+pub struct MlKem<P: MlKemParams>(PhantomData<P>);
+
+impl<P: MlKemParams> Kem for MlKem<P> {
+    type DecapsulationKey = Dk<P>;
+    type EncapsulationKey = Ek<P>;
+    type SharedKeySize = U32;
+    type CiphertextSize = P::CtSize;
+}
+
+/// Decapsulation key (the secret-side ML-KEM byte-encoded `dk`).
+/// Caches the embedded ek so [`Decapsulator::encapsulation_key`]
+/// returns `&Ek<P>` without re-parsing.
+#[derive(Clone)]
+pub struct Dk<P: MlKemParams> {
+    sk: Zeroizing<Array<u8, P::DkSize>>,
+    ek: Ek<P>,
+}
+
+impl<P: MlKemParams> fmt::Debug for Dk<P> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Dk")
+            .field("sk", &"<secret>")
+            .field("ek", &self.ek)
+            .finish()
+    }
+}
+
+/// Encapsulation key (the public-side ML-KEM byte-encoded `ek`).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Ek<P: MlKemParams> {
+    ek: Array<u8, P::EkSize>,
+}
+
+impl<P: MlKemParams> KeySizeUser for Ek<P> {
+    type KeySize = P::EkSize;
+}
+
+// No infallible `KeyInit` for the public-side ek: peer-supplied bytes
+// must pass the FIPS 203 §7.2 modulus check.
+impl<P: MlKemParams> TryKeyInit for Ek<P> {
+    fn new(key: &Array<u8, P::EkSize>) -> Result<Self, kem::InvalidKey> {
+        P::kem_ek_validate(key)?;
+        Ok(Self { ek: key.clone() })
+    }
+}
+
+impl<P: MlKemParams> KeyExport for Ek<P> {
+    fn to_bytes(&self) -> Array<u8, P::EkSize> {
+        self.ek.clone()
+    }
+}
+
+impl<P: MlKemParams> Encapsulate for Ek<P> {
+    type Kem = MlKem<P>;
+
+    fn encapsulate_with_rng<R>(&self, rng: &mut R) -> (Array<u8, P::CtSize>, Array<u8, U32>)
+    where
+        R: CryptoRng + ?Sized,
+    {
+        let mut m = Zeroizing::new([0u8; 32]);
+        rand_core::Rng::fill_bytes(rng, &mut *m);
+        // TODO: drop .expect — needs const-generic Params buffer sizes + CanonicalEk typestate.
+        let (ss_bytes, ct_bytes) = P::kem_encaps(&self.ek, &m)
+            .expect("kem_encaps infallible: ek validated at construction, buffers pinned");
+        (ct_bytes, ss_bytes)
+    }
+}
+
+impl<P: MlKemParams> KeySizeUser for Dk<P> {
+    type KeySize = P::DkSize;
+}
+
+// Symmetric with `Ek::TryKeyInit`: peer-supplied dk bytes embed an ek
+// that must satisfy the FIPS 203 §7.2 modulus check, else
+// `encapsulation_key()` would silently hand out a non-canonical Ek.
+impl<P: MlKemParams> TryKeyInit for Dk<P> {
+    fn new(key: &Array<u8, P::DkSize>) -> Result<Self, kem::InvalidKey> {
+        let ek_start = P::kem_ek_offset();
+        let ek_end = ek_start + <P::EkSize as Unsigned>::USIZE;
+        let mut ek_bytes = Array::<u8, P::EkSize>::default();
+        ek_bytes.copy_from_slice(key.get(ek_start..ek_end).ok_or(kem::InvalidKey)?);
+        let ek = <Ek<P> as TryKeyInit>::new(&ek_bytes)?;
+        Ok(Self {
+            sk: Zeroizing::new(key.clone()),
+            ek,
+        })
+    }
+}
+
+impl<P: MlKemParams> Generate for Dk<P> {
+    fn try_generate_from_rng<R: TryCryptoRng + ?Sized>(rng: &mut R) -> Result<Self, R::Error> {
+        // The trait error type is fixed to R::Error; draw seeds locally so
+        // the structurally-unreachable EncodeError arm stays out of the
+        // trait's error channel.
+        let mut d = Zeroizing::new([0u8; 32]);
+        let mut z = Zeroizing::new([0u8; 32]);
+        rng.try_fill_bytes(&mut *d)?;
+        rng.try_fill_bytes(&mut *z)?;
+        // TODO: drop .expect — trait's R::Error can't carry EncodeError without a breaking where bound.
+        let (ek_bytes, sk_bytes) =
+            P::kem_keygen(&d, &z).expect("kem_keygen infallible on facade-pinned buffer sizes");
+        let ek = Ek { ek: ek_bytes };
+        Ok(Self {
+            sk: Zeroizing::new(sk_bytes),
+            ek,
+        })
+    }
+}
+
+impl<P: MlKemParams> Decapsulator for Dk<P> {
+    type Kem = MlKem<P>;
+
+    fn encapsulation_key(&self) -> &Ek<P> {
+        &self.ek
+    }
+}
+
+// Only `TryDecapsulate` (not infallible `Decapsulate`) so the facade's
+// structural EncodeError surfaces as an Err rather than a panic.
+impl<P: MlKemParams> TryDecapsulate for Dk<P> {
+    type Error = crate::EncodeError;
+
+    fn try_decapsulate(&self, ct: &Array<u8, P::CtSize>) -> Result<Array<u8, U32>, Self::Error> {
+        P::kem_decaps(&self.sk, ct)
+    }
+}
+
+// ============================================================================
+// ML-DSA generic types
+// ============================================================================
+
+use signature::{Error as SigError, Keypair, RandomizedSigner, Verifier};
+
+/// Byte-encoded ML-DSA signature.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct MlDsaSignature<P: MlDsaParams>(Array<u8, P::SigSize>);
+
+impl<P: MlDsaParams> AsRef<[u8]> for MlDsaSignature<P> {
+    fn as_ref(&self) -> &[u8] {
+        &self.0
+    }
+}
+
+impl<P: MlDsaParams> From<Array<u8, P::SigSize>> for MlDsaSignature<P> {
+    fn from(a: Array<u8, P::SigSize>) -> Self {
+        Self(a)
+    }
+}
+
+impl<P: MlDsaParams> TryFrom<&[u8]> for MlDsaSignature<P> {
+    type Error = SigError;
+    fn try_from(bytes: &[u8]) -> Result<Self, SigError> {
+        Array::try_from(bytes)
+            .map(Self)
+            .map_err(|_| SigError::new())
+    }
+}
+
+/// Verifier (public key holder) for ML-DSA.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct MlDsaVerifier<P: MlDsaParams> {
+    pk: Array<u8, P::PkSize>,
+}
+
+impl<P: MlDsaParams> KeySizeUser for MlDsaVerifier<P> {
+    type KeySize = P::PkSize;
+}
+
+impl<P: MlDsaParams> KeyInit for MlDsaVerifier<P> {
+    fn new(key: &Array<u8, P::PkSize>) -> Self {
+        Self { pk: key.clone() }
+    }
+}
+
+impl<P: MlDsaParams> KeyExport for MlDsaVerifier<P> {
+    fn to_bytes(&self) -> Array<u8, P::PkSize> {
+        self.pk.clone()
+    }
+}
+
+impl<P: MlDsaParams> Verifier<MlDsaSignature<P>> for MlDsaVerifier<P> {
+    fn verify(&self, msg: &[u8], signature: &MlDsaSignature<P>) -> Result<(), SigError> {
+        if P::dsa_verify(&self.pk, msg, &[], &signature.0) {
+            Ok(())
+        } else {
+            Err(SigError::new())
+        }
+    }
+}
+
+/// Signer (secret key holder) for ML-DSA. Caches the verifying key so
+/// [`Keypair::verifying_key`] doesn't have to re-derive it.
+#[derive(Clone)]
+pub struct MlDsaSigner<P: MlDsaParams> {
+    sk: Zeroizing<Array<u8, P::SkSize>>,
+    vk: MlDsaVerifier<P>,
+}
+
+impl<P: MlDsaParams> fmt::Debug for MlDsaSigner<P> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("MlDsaSigner")
+            .field("sk", &"<secret>")
+            .field("vk", &self.vk)
+            .finish()
+    }
+}
+
+impl<P: MlDsaParams> MlDsaSigner<P> {
+    /// Build a Signer from the byte-encoded `(sk, pk)` pair.
+    /// FIPS 204 sk does not contain the literal pk bytes, so the caller
+    /// must supply both halves; this is the natural counterpart to
+    /// `keygen_from_seed` which returns them together.
+    pub fn from_keypair(sk: &Array<u8, P::SkSize>, pk: &Array<u8, P::PkSize>) -> Self {
+        Self {
+            sk: Zeroizing::new(sk.clone()),
+            vk: MlDsaVerifier { pk: pk.clone() },
+        }
+    }
+}
+
+impl<P: MlDsaParams> Keypair for MlDsaSigner<P> {
+    type VerifyingKey = MlDsaVerifier<P>;
+    fn verifying_key(&self) -> Self::VerifyingKey {
+        self.vk.clone()
+    }
+}
+
+impl<P: MlDsaParams> RandomizedSigner<MlDsaSignature<P>> for MlDsaSigner<P> {
+    fn try_sign_with_rng<R: TryCryptoRng + ?Sized>(
+        &self,
+        rng: &mut R,
+        msg: &[u8],
+    ) -> Result<MlDsaSignature<P>, SigError> {
+        let bytes = P::dsa_sign_random(&self.sk, msg, &[], rng).map_err(|_| SigError::new())?;
+        Ok(MlDsaSignature(bytes))
+    }
+}
+
+impl<P: MlDsaParams> Generate for MlDsaSigner<P> {
+    fn try_generate_from_rng<R: TryCryptoRng + ?Sized>(rng: &mut R) -> Result<Self, R::Error> {
+        // Same shape as the ML-KEM Dk Generate impl: bypass the facade's
+        // RandError-returning keygen so the structurally-unreachable
+        // Encode arm doesn't have to squeeze through R::Error.
+        let mut xi = Zeroizing::new([0u8; 32]);
+        rng.try_fill_bytes(&mut *xi)?;
+        // TODO: drop .expect — trait's R::Error can't carry EncodeError without a breaking where bound.
+        let (pk_bytes, sk_bytes) =
+            P::dsa_keygen(&xi).expect("dsa_keygen infallible on facade-pinned buffer sizes");
+        Ok(Self {
+            sk: Zeroizing::new(sk_bytes),
+            vk: MlDsaVerifier { pk: pk_bytes },
+        })
+    }
+}
 
 #[cfg(test)]
 mod tests {
@@ -440,7 +711,7 @@ mod tests {
     #[test]
     fn mlkem512_roundtrip_via_traits() {
         let mut rng = FixedRng(0x42);
-        let dk = Dk512::try_generate_from_rng(&mut rng).unwrap();
+        let dk = Dk::<MlKem512>::try_generate_from_rng(&mut rng).unwrap();
         let ek = dk.encapsulation_key().clone();
 
         let mut crng = FixedRng(0x77);
@@ -453,11 +724,11 @@ mod tests {
     #[test]
     fn mldsa44_roundtrip_via_traits() {
         let mut rng = FixedRng(0x42);
-        let signer = MlDsa44Signer::try_generate_from_rng(&mut rng).unwrap();
+        let signer = MlDsaSigner::<MlDsa44>::try_generate_from_rng(&mut rng).unwrap();
         let verifier = signer.verifying_key();
 
         let msg = b"hello pqc traits";
-        let sig: MlDsa44Signature = signer.sign(msg);
+        let sig: MlDsaSignature<MlDsa44> = signer.sign_with_rng(&mut FixedRng(0x55), msg);
         verifier.verify(msg, &sig).expect("verify should pass");
 
         let wrong = b"hello rust crypto";
@@ -470,12 +741,12 @@ mod tests {
     #[test]
     fn mldsa65_randomized_roundtrip_via_traits() {
         let mut rng = FixedRng(0x99);
-        let signer = MlDsa65Signer::try_generate_from_rng(&mut rng).unwrap();
+        let signer = MlDsaSigner::<MlDsa65>::try_generate_from_rng(&mut rng).unwrap();
         let verifier = signer.verifying_key();
 
         let mut crng = FixedRng(0x55);
         let msg = b"randomized";
-        let sig: MlDsa65Signature = signer.sign_with_rng(&mut crng, msg);
+        let sig: MlDsaSignature<MlDsa65> = signer.sign_with_rng(&mut crng, msg);
         verifier.verify(msg, &sig).expect("verify should pass");
     }
 
@@ -485,37 +756,36 @@ mod tests {
     #[test]
     fn mlkem512_trykeyinit_rejects_non_canonical_ek() {
         let mut rng = FixedRng(0x42);
-        let dk = Dk512::try_generate_from_rng(&mut rng).unwrap();
+        let dk = Dk::<MlKem512>::try_generate_from_rng(&mut rng).unwrap();
         let mut bytes: Array<u8, sizes::U800> = dk.ek.ek;
         // Pack the first 12-bit coefficient as 0xFFF (4095, > q = 3329).
         bytes[0] = 0xFF;
         bytes[1] = (bytes[1] & 0xF0) | 0x0F;
-        assert!(<Ek512 as TryKeyInit>::new(&bytes).is_err());
+        assert!(<Ek<MlKem512> as TryKeyInit>::new(&bytes).is_err());
     }
 
     /// Symmetric with the Ek test: a Dk byte blob with a non-canonical
-    /// embedded ek must be rejected at TryKeyInit; otherwise Dk's
-    /// `encapsulation_key()` would silently surface an invalid Ek.
+    /// embedded ek must be rejected at TryKeyInit.
     #[test]
     fn mlkem512_trykeyinit_dk_rejects_non_canonical_embedded_ek() {
         let mut rng = FixedRng(0x42);
-        let dk_good = Dk512::try_generate_from_rng(&mut rng).unwrap();
+        let dk_good = Dk::<MlKem512>::try_generate_from_rng(&mut rng).unwrap();
         let mut bytes: Array<u8, sizes::U1632> = *dk_good.sk;
-        // ek_pke starts at offset 384 * K = 768; first 12-bit coeff
+        // ek starts at MlKem512::kem_ek_offset() = 768; first 12-bit coeff
         // sits at bytes 768..770.
-        let ek_off = Dk512::DK_PKE_LEN;
+        let ek_off = MlKem512::kem_ek_offset();
         bytes[ek_off] = 0xFF;
         bytes[ek_off + 1] = (bytes[ek_off + 1] & 0xF0) | 0x0F;
-        assert!(<Dk512 as TryKeyInit>::new(&bytes).is_err());
+        assert!(<Dk<MlKem512> as TryKeyInit>::new(&bytes).is_err());
     }
 
     /// Success path of TryKeyInit for Dk, Ek::to_bytes, and Dk::Debug.
     #[test]
     fn mlkem512_dk_trykeyinit_valid_and_debug() {
         let mut rng = FixedRng(0x42);
-        let dk = Dk512::try_generate_from_rng(&mut rng).unwrap();
+        let dk = Dk::<MlKem512>::try_generate_from_rng(&mut rng).unwrap();
         let sk_bytes: Array<u8, sizes::U1632> = *dk.sk;
-        let dk2 = <Dk512 as TryKeyInit>::new(&sk_bytes).unwrap();
+        let dk2 = <Dk<MlKem512> as TryKeyInit>::new(&sk_bytes).unwrap();
         // Dk::Debug
         let _ = std::format!("{:?}", dk2);
         // Ek::to_bytes (KeyExport)
@@ -526,7 +796,7 @@ mod tests {
     #[test]
     fn mlkem768_roundtrip_via_traits() {
         let mut rng = FixedRng(0x55);
-        let dk = Dk768::try_generate_from_rng(&mut rng).unwrap();
+        let dk = Dk::<MlKem768>::try_generate_from_rng(&mut rng).unwrap();
         let ek = dk.encapsulation_key().clone();
         let (ct, ss_send) = ek.encapsulate_with_rng(&mut FixedRng(0x77));
         let ss_recv = dk.try_decapsulate(&ct).unwrap();
@@ -536,7 +806,7 @@ mod tests {
     #[test]
     fn mlkem1024_roundtrip_via_traits() {
         let mut rng = FixedRng(0x33);
-        let dk = Dk1024::try_generate_from_rng(&mut rng).unwrap();
+        let dk = Dk::<MlKem1024>::try_generate_from_rng(&mut rng).unwrap();
         let ek = dk.encapsulation_key().clone();
         let (ct, ss_send) = ek.encapsulate_with_rng(&mut FixedRng(0x44));
         let ss_recv = dk.try_decapsulate(&ct).unwrap();
@@ -547,37 +817,37 @@ mod tests {
     #[test]
     fn mldsa44_sig_conversions() {
         let mut rng = FixedRng(0x42);
-        let signer = MlDsa44Signer::try_generate_from_rng(&mut rng).unwrap();
-        let sig: MlDsa44Signature = signer.sign(b"test");
+        let signer = MlDsaSigner::<MlDsa44>::try_generate_from_rng(&mut rng).unwrap();
+        let sig: MlDsaSignature<MlDsa44> = signer.sign_with_rng(&mut FixedRng(0x55), b"test");
 
         // AsRef<[u8]>
         let bytes: &[u8] = sig.as_ref();
 
         // TryFrom<&[u8]> success
-        let sig2 = MlDsa44Signature::try_from(bytes).unwrap();
+        let sig2 = MlDsaSignature::<MlDsa44>::try_from(bytes).unwrap();
         assert_eq!(sig, sig2);
 
         // From<Array<u8, _>>
         let arr = Array::<u8, sizes::U2420>::default();
-        let _ = MlDsa44Signature::from(arr);
+        let _ = MlDsaSignature::<MlDsa44>::from(arr);
 
         // TryFrom<&[u8]> failure on wrong length
-        assert!(MlDsa44Signature::try_from(&[0u8; 42][..]).is_err());
+        assert!(MlDsaSignature::<MlDsa44>::try_from(&[0u8; 42][..]).is_err());
     }
 
     /// Verifier KeyInit, KeyExport, and verify-rejects-wrong-sig.
     #[test]
     fn mldsa44_verifier_init_and_export() {
         let mut rng = FixedRng(0x42);
-        let signer = MlDsa44Signer::try_generate_from_rng(&mut rng).unwrap();
+        let signer = MlDsaSigner::<MlDsa44>::try_generate_from_rng(&mut rng).unwrap();
         let vk = signer.verifying_key();
 
         // KeyExport
         let pk_bytes = vk.to_bytes();
         // KeyInit
-        let vk2 = MlDsa44Verifier::new(&pk_bytes);
+        let vk2 = MlDsaVerifier::<MlDsa44>::new(&pk_bytes);
 
-        let sig: MlDsa44Signature = signer.sign(b"hello");
+        let sig: MlDsaSignature<MlDsa44> = signer.sign_with_rng(&mut FixedRng(0x55), b"hello");
         vk2.verify(b"hello", &sig).unwrap();
     }
 
@@ -587,26 +857,27 @@ mod tests {
         let (pk_bytes, sk_bytes) = crate::ml_dsa_44::keygen_from_seed(&[0x42u8; 32]).unwrap();
         let sk_arr = Array::from(sk_bytes);
         let pk_arr = Array::from(pk_bytes);
-        let signer = MlDsa44Signer::from_keypair(&sk_arr, &pk_arr);
+        let signer = MlDsaSigner::<MlDsa44>::from_keypair(&sk_arr, &pk_arr);
         let vk = signer.verifying_key();
 
         // Debug
         let _ = std::format!("{:?}", signer);
 
-        let sig: MlDsa44Signature = signer.sign(b"from_keypair");
+        let sig: MlDsaSignature<MlDsa44> =
+            signer.sign_with_rng(&mut FixedRng(0x55), b"from_keypair");
         vk.verify(b"from_keypair", &sig).unwrap();
     }
 
-    /// ML-DSA-87 via traits (covers the third macro expansion).
+    /// ML-DSA-87 via traits (covers the third parameter set).
     #[test]
     fn mldsa87_roundtrip_via_traits() {
         let mut rng = FixedRng(0x99);
-        let signer = MlDsa87Signer::try_generate_from_rng(&mut rng).unwrap();
+        let signer = MlDsaSigner::<MlDsa87>::try_generate_from_rng(&mut rng).unwrap();
         let vk = signer.verifying_key();
         let msg = b"ml-dsa-87 via traits";
-        let sig: MlDsa87Signature = signer.sign(msg);
+        let sig: MlDsaSignature<MlDsa87> = signer.sign_with_rng(&mut FixedRng(0x55), msg);
         vk.verify(msg, &sig).unwrap();
-        let sig2: MlDsa87Signature = signer.sign_with_rng(&mut FixedRng(0x55), msg);
+        let sig2: MlDsaSignature<MlDsa87> = signer.sign_with_rng(&mut FixedRng(0x66), msg);
         vk.verify(msg, &sig2).unwrap();
     }
 }

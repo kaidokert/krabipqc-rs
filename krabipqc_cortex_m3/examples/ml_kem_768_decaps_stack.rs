@@ -2,12 +2,18 @@
 #![no_std]
 
 use cortex_m_rt::entry;
+use hybrid_array::Array;
+use kem::{TryDecapsulate, TryKeyInit};
+use krabipqc::{Dk, MlKem768};
 use krabipqc_cortex_m3::test_fixture;
 use krabipqc_cortex_m3::test_vector::{KEM768_CT, KEM768_DK, KEM768_SS};
 
 fn decaps_and_check() -> bool {
-    match krabipqc::ml_kem_768::decaps_internal(&KEM768_DK, &KEM768_CT) {
-        Ok(ss) => ss == KEM768_SS,
+    let Ok(dk) = Dk::<MlKem768>::new(&Array::from(KEM768_DK)) else {
+        return false;
+    };
+    match dk.try_decapsulate(&Array::from(KEM768_CT)) {
+        Ok(ss) => *ss == KEM768_SS,
         Err(_) => false,
     }
 }

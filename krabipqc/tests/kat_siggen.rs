@@ -1,3 +1,4 @@
+#![cfg(feature = "acvp")]
 //! ACVP KAT for ML-DSA-{44,65,87} Sign_internal.
 //!
 //! Vector source: NIST ACVP-Server ML-DSA-sigGen-FIPS204

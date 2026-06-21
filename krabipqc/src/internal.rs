@@ -98,6 +98,7 @@ where
 /// Single-slice `m_prime` shim around [`sign_internal_impl_pieces`].
 /// External callers building `M'` from `(message, ctx)` should use
 /// the `sign` / `hash_sign` wrappers on the per-set facade.
+#[cfg(feature = "acvp")]
 pub fn sign_internal_impl<const K: usize, const L: usize, P>(
     params: &Params<K, L>,
     sk: &[u8],
@@ -397,6 +398,7 @@ where
 }
 
 /// Single-slice `M'` shim around [`verify_internal_impl_pieces`].
+#[cfg(feature = "acvp")]
 pub fn verify_internal_impl<const K: usize, const L: usize, P>(
     params: &Params<K, L>,
     pk: &[u8],
@@ -572,11 +574,20 @@ mod tests {
         keygen_internal_impl::<K, L, Nct>(params, &xi, &mut pk, &mut sk).unwrap();
         let mp = message_prime(b"", b"hello mldsa");
         let mut sig = vec![0u8; params.sig_bytes];
-        sign_internal_impl::<K, L, Nct>(params, &sk, &mp, &[0xC3u8; 32], &mut sig).unwrap();
-        assert!(verify_internal_impl::<K, L, Nct>(params, &pk, &mp, &sig));
+        sign_internal_impl_pieces::<K, L, Nct>(params, &sk, &[&mp], &[0xC3u8; 32], &mut sig)
+            .unwrap();
+        assert!(verify_internal_impl_pieces::<K, L, Nct>(
+            params,
+            &pk,
+            &[&mp],
+            &sig
+        ));
         let mp_bad = message_prime(b"", b"different message");
-        assert!(!verify_internal_impl::<K, L, Nct>(
-            params, &pk, &mp_bad, &sig
+        assert!(!verify_internal_impl_pieces::<K, L, Nct>(
+            params,
+            &pk,
+            &[&mp_bad],
+            &sig
         ));
     }
 
@@ -603,12 +614,19 @@ mod tests {
         keygen_internal_impl::<4, 4, Nct>(&ML_DSA_44, &[2u8; 32], &mut pk2, &mut sk2).unwrap();
         let mp = message_prime(b"", b"msg");
         let mut sig = vec![0u8; ML_DSA_44.sig_bytes];
-        sign_internal_impl::<4, 4, Nct>(&ML_DSA_44, &sk1, &mp, &[0u8; 32], &mut sig).unwrap();
-        assert!(verify_internal_impl::<4, 4, Nct>(
-            &ML_DSA_44, &pk1, &mp, &sig
+        sign_internal_impl_pieces::<4, 4, Nct>(&ML_DSA_44, &sk1, &[&mp], &[0u8; 32], &mut sig)
+            .unwrap();
+        assert!(verify_internal_impl_pieces::<4, 4, Nct>(
+            &ML_DSA_44,
+            &pk1,
+            &[&mp],
+            &sig
         ));
-        assert!(!verify_internal_impl::<4, 4, Nct>(
-            &ML_DSA_44, &pk2, &mp, &sig
+        assert!(!verify_internal_impl_pieces::<4, 4, Nct>(
+            &ML_DSA_44,
+            &pk2,
+            &[&mp],
+            &sig
         ));
     }
 
@@ -630,15 +648,22 @@ mod tests {
         let rnd = [0x29u8; 32];
         let mut sig_nct = vec![0u8; params.sig_bytes];
         let mut sig_ct = vec![0u8; params.sig_bytes];
-        sign_internal_impl::<K, L, Nct>(params, &sk_nct, &mp, &rnd, &mut sig_nct).unwrap();
-        sign_internal_impl::<K, L, Ct>(params, &sk_ct, &mp, &rnd, &mut sig_ct).unwrap();
+        sign_internal_impl_pieces::<K, L, Nct>(params, &sk_nct, &[&mp], &rnd, &mut sig_nct)
+            .unwrap();
+        sign_internal_impl_pieces::<K, L, Ct>(params, &sk_ct, &[&mp], &rnd, &mut sig_ct).unwrap();
         assert_eq!(sig_nct, sig_ct, "signature Nct/Ct mismatch");
 
-        assert!(verify_internal_impl::<K, L, Nct>(
-            params, &pk_nct, &mp, &sig_nct
+        assert!(verify_internal_impl_pieces::<K, L, Nct>(
+            params,
+            &pk_nct,
+            &[&mp],
+            &sig_nct
         ));
-        assert!(verify_internal_impl::<K, L, Ct>(
-            params, &pk_ct, &mp, &sig_ct
+        assert!(verify_internal_impl_pieces::<K, L, Ct>(
+            params,
+            &pk_ct,
+            &[&mp],
+            &sig_ct
         ));
     }
 
