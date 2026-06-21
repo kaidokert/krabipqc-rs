@@ -506,8 +506,10 @@ impl<P: MlKemParams> TryKeyInit for Dk<P> {
     fn new(key: &Array<u8, P::DkSize>) -> Result<Self, kem::InvalidKey> {
         let ek_start = P::kem_ek_offset();
         let ek_end = ek_start + <P::EkSize as Unsigned>::USIZE;
-        let mut ek_bytes = Array::<u8, P::EkSize>::default();
-        ek_bytes.copy_from_slice(key.get(ek_start..ek_end).ok_or(kem::InvalidKey)?);
+        let ek_bytes: Array<u8, P::EkSize> = key
+            .get(ek_start..ek_end)
+            .and_then(|s| s.try_into().ok())
+            .ok_or(kem::InvalidKey)?;
         let ek = <Ek<P> as TryKeyInit>::new(&ek_bytes)?;
         Ok(Self {
             sk: Zeroizing::new(key.clone()),
