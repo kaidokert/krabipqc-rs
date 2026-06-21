@@ -2,16 +2,19 @@
 #![no_std]
 
 use cortex_m_rt::entry;
+use hybrid_array::Array;
+use kem::KeyInit;
+use krabipqc::{MlDsa87, MlDsaSignature, MlDsaVerifier};
 use krabipqc_cortex_m3::test_fixture;
 use krabipqc_cortex_m3::test_vector::{MESSAGE, PK_87, SIG_87};
+use signature::Verifier;
 
 fn verify() -> bool {
-    let mut m_prime = [0u8; 256];
-    m_prime[0] = 0x00;
-    m_prime[1] = 0x00;
-    let len = 2 + MESSAGE.len();
-    m_prime[2..len].copy_from_slice(MESSAGE);
-    krabipqc::ml_dsa_87::verify_internal(&PK_87, &m_prime[..len], &SIG_87)
+    let vk = MlDsaVerifier::<MlDsa87>::new(&Array::from(PK_87));
+    let Ok(sig) = MlDsaSignature::<MlDsa87>::try_from(&SIG_87[..]) else {
+        return false;
+    };
+    vk.verify(MESSAGE, &sig).is_ok()
 }
 
 #[entry]

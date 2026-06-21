@@ -148,9 +148,12 @@ dependencies = [
 name = "krabipqc_riscv32"
 version = "0.1.0"
 dependencies = [
+ "hybrid-array",
+ "kem",
  "krabipqc",
  "modmath",
  "riscv-rt",
+ "signature",
 ]
 
 [[package]]

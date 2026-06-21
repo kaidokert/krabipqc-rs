@@ -1,23 +1,20 @@
 #![no_main]
 #![no_std]
 
+use hybrid_array::Array;
+use kem::KeyInit;
+use krabipqc::{MlDsa44, MlDsaSignature, MlDsaVerifier};
 use krabipqc_riscv32::test_fixture;
 use krabipqc_riscv32::test_vector::{MESSAGE, PK, SIG};
 use riscv_rt::entry;
+use signature::Verifier;
 
 fn verify() -> bool {
-    let mut m_prime = [0u8; 256];
-    m_prime[0] = 0x00;
-    m_prime[1] = 0x00;
-    let len = 2 + MESSAGE.len();
-    let Some(slot) = m_prime.get_mut(2..len) else {
+    let vk = MlDsaVerifier::<MlDsa44>::new(&Array::from(PK));
+    let Ok(sig) = MlDsaSignature::<MlDsa44>::try_from(&SIG[..]) else {
         return false;
     };
-    slot.copy_from_slice(MESSAGE);
-    let Some(slice) = m_prime.get(..len) else {
-        return false;
-    };
-    krabipqc::ml_dsa_44::verify_internal(&PK, slice, &SIG)
+    vk.verify(MESSAGE, &sig).is_ok()
 }
 
 #[entry]
