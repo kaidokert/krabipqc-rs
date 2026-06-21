@@ -139,15 +139,15 @@ macro_rules! impl_mlkem_kem {
                 // The trait error type is fixed to R::Error, but our
                 // facade keygen returns KemError<R::Error>. Draw the
                 // seeds locally so any structurally-unreachable Encode
-                // arm from keygen_internal stays out of the trait's
+                // arm from keygen_from_seed stays out of the trait's
                 // error channel.
                 let mut d = Zeroizing::new([0u8; 32]);
                 let mut z = Zeroizing::new([0u8; 32]);
                 rng.try_fill_bytes(&mut *d)?;
                 rng.try_fill_bytes(&mut *z)?;
                 // TODO: drop .expect — trait's R::Error can't carry EncodeError without a breaking where bound.
-                let (ek_bytes, sk_bytes) = crate::$facade::keygen_internal(&d, &z)
-                    .expect("keygen_internal infallible on facade-pinned buffer sizes");
+                let (ek_bytes, sk_bytes) = crate::$facade::keygen_from_seed(&d, &z)
+                    .expect("keygen_from_seed infallible on facade-pinned buffer sizes");
                 let ek = $ek_struct {
                     ek: Array::from(ek_bytes),
                 };
@@ -176,7 +176,7 @@ macro_rules! impl_mlkem_kem {
             ) -> Result<Array<u8, U32>, Self::Error> {
                 let sk_arr: &[u8; crate::$facade::DK_BYTES] = (&*self.sk).as_ref();
                 let ct_arr: &[u8; crate::$facade::CT_BYTES] = ct.as_ref();
-                let ss = crate::$facade::decaps_internal(sk_arr, ct_arr)?;
+                let ss = crate::$facade::decaps(sk_arr, ct_arr)?;
                 Ok(Array::from(ss))
             }
         }
@@ -195,8 +195,8 @@ macro_rules! impl_mlkem_kem {
                 let mut m = Zeroizing::new([0u8; 32]);
                 rand_core::Rng::fill_bytes(rng, &mut *m);
                 // TODO: drop .expect — needs const-generic Params buffer sizes + CanonicalEk typestate.
-                let (ss_bytes, ct_bytes) = crate::$facade::encaps_internal(ek_arr, &m)
-                    .expect("encaps_internal infallible: ek validated, buffers pinned");
+                let (ss_bytes, ct_bytes) = crate::$facade::encaps_from_seed(ek_arr, &m)
+                    .expect("encaps_from_seed infallible: ek validated, buffers pinned");
                 (Array::from(ct_bytes), Array::from(ss_bytes))
             }
         }
@@ -368,8 +368,8 @@ macro_rules! impl_mldsa_sig {
                 let mut xi = Zeroizing::new([0u8; 32]);
                 rng.try_fill_bytes(&mut *xi)?;
                 // TODO: drop .expect — trait's R::Error can't carry EncodeError without a breaking where bound.
-                let (pk_bytes, sk_bytes) = crate::$facade::keygen_internal(&xi)
-                    .expect("keygen_internal infallible on facade-pinned buffer sizes");
+                let (pk_bytes, sk_bytes) = crate::$facade::keygen_from_seed(&xi)
+                    .expect("keygen_from_seed infallible on facade-pinned buffer sizes");
                 Ok(Self {
                     sk: Zeroizing::new(Array::from(sk_bytes)),
                     vk: $verifier {
@@ -584,7 +584,7 @@ mod tests {
     /// Signer::from_keypair and Signer::Debug.
     #[test]
     fn mldsa44_signer_from_keypair_and_debug() {
-        let (pk_bytes, sk_bytes) = crate::ml_dsa_44::keygen_internal(&[0x42u8; 32]).unwrap();
+        let (pk_bytes, sk_bytes) = crate::ml_dsa_44::keygen_from_seed(&[0x42u8; 32]).unwrap();
         let sk_arr = Array::from(sk_bytes);
         let pk_arr = Array::from(pk_bytes);
         let signer = MlDsa44Signer::from_keypair(&sk_arr, &pk_arr);

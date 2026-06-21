@@ -53,6 +53,7 @@ pub fn shake256(inputs: &[&[u8]], out: &mut [u8]) {
 }
 
 /// Convenience: SHAKE-128 to a fixed-size output, one-shot.
+#[cfg(test)]
 pub fn shake128(inputs: &[&[u8]], out: &mut [u8]) {
     let mut s = Shake128Stream::new(inputs);
     s.squeeze(out);

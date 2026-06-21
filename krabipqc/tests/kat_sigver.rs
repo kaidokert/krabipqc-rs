@@ -1,4 +1,4 @@
-//! ACVP KAT for ML-DSA-{44,65,87} Verify_internal.
+//! ACVP KAT for ML-DSA-{44,65,87} verify_msg_repr (message representative).
 //!
 //! Vector source: NIST ACVP-Server ML-DSA-sigVer-FIPS204
 //!   - group tgId=8  : ML-DSA-44 internal, externalMu=false
@@ -107,7 +107,7 @@ where
 }
 
 #[test]
-fn acvp_ml_dsa_44_sigver_internal() {
+fn acvp_ml_dsa_44_sigver() {
     run_kat(
         include_str!("kat_sigver_mldsa44_prompt.json"),
         include_str!("kat_sigver_mldsa44_expected.json"),
@@ -118,13 +118,13 @@ fn acvp_ml_dsa_44_sigver_internal() {
             pk.copy_from_slice(pk_bytes);
             let mut sig = [0u8; ml_dsa_44::SIG_BYTES];
             sig.copy_from_slice(sig_bytes);
-            ml_dsa_44::verify_internal(&pk, msg, &sig)
+            ml_dsa_44::verify_msg_repr(&pk, msg, &sig)
         },
     );
 }
 
 #[test]
-fn acvp_ml_dsa_65_sigver_internal() {
+fn acvp_ml_dsa_65_sigver() {
     run_kat(
         include_str!("kat_sigver_mldsa65_prompt.json"),
         include_str!("kat_sigver_mldsa65_expected.json"),
@@ -135,13 +135,13 @@ fn acvp_ml_dsa_65_sigver_internal() {
             pk.copy_from_slice(pk_bytes);
             let mut sig = [0u8; ml_dsa_65::SIG_BYTES];
             sig.copy_from_slice(sig_bytes);
-            ml_dsa_65::verify_internal(&pk, msg, &sig)
+            ml_dsa_65::verify_msg_repr(&pk, msg, &sig)
         },
     );
 }
 
 #[test]
-fn acvp_ml_dsa_87_sigver_internal() {
+fn acvp_ml_dsa_87_sigver() {
     run_kat(
         include_str!("kat_sigver_mldsa87_prompt.json"),
         include_str!("kat_sigver_mldsa87_expected.json"),
@@ -152,7 +152,7 @@ fn acvp_ml_dsa_87_sigver_internal() {
             pk.copy_from_slice(pk_bytes);
             let mut sig = [0u8; ml_dsa_87::SIG_BYTES];
             sig.copy_from_slice(sig_bytes);
-            ml_dsa_87::verify_internal(&pk, msg, &sig)
+            ml_dsa_87::verify_msg_repr(&pk, msg, &sig)
         },
     );
 }

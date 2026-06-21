@@ -1,4 +1,4 @@
-//! ACVP KAT for ML-KEM-512/768/1024 KeyGen_internal.
+//! ACVP KAT for ML-KEM-512/768/1024 keygen_from_seed.
 //!
 //! Vector source: NIST ACVP-Server
 //!   gen-val/json-files/ML-KEM-keyGen-FIPS203/{prompt,expectedResults}.json
@@ -51,7 +51,7 @@ fn compare(label: &str, got: &[u8], want: &[u8]) {
 #[test]
 fn acvp_ml_kem_512_keygen_tc1() {
     let (z, d, ek_exp, dk_exp) = parse_quad(include_str!("kat_mlkem512_keygen_tc1.txt"));
-    let (ek, dk) = ml_kem_512::keygen_internal(&d, &z).unwrap();
+    let (ek, dk) = ml_kem_512::keygen_from_seed(&d, &z).unwrap();
     compare("ek", &ek, &ek_exp);
     compare("dk", &dk, &dk_exp);
 }
@@ -59,7 +59,7 @@ fn acvp_ml_kem_512_keygen_tc1() {
 #[test]
 fn acvp_ml_kem_768_keygen_tc26() {
     let (z, d, ek_exp, dk_exp) = parse_quad(include_str!("kat_mlkem768_keygen_tc26.txt"));
-    let (ek, dk) = ml_kem_768::keygen_internal(&d, &z).unwrap();
+    let (ek, dk) = ml_kem_768::keygen_from_seed(&d, &z).unwrap();
     compare("ek", &ek, &ek_exp);
     compare("dk", &dk, &dk_exp);
 }
@@ -67,7 +67,7 @@ fn acvp_ml_kem_768_keygen_tc26() {
 #[test]
 fn acvp_ml_kem_1024_keygen_tc51() {
     let (z, d, ek_exp, dk_exp) = parse_quad(include_str!("kat_mlkem1024_keygen_tc51.txt"));
-    let (ek, dk) = ml_kem_1024::keygen_internal(&d, &z).unwrap();
+    let (ek, dk) = ml_kem_1024::keygen_from_seed(&d, &z).unwrap();
     compare("ek", &ek, &ek_exp);
     compare("dk", &dk, &dk_exp);
 }

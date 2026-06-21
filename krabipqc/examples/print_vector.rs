@@ -13,9 +13,9 @@ fn main() {
     let mut mp = vec![0u8, 0u8];
     mp.extend_from_slice(MESSAGE);
 
-    let (pk, sk) = ml_dsa_44::keygen_internal(&XI).unwrap();
-    let sig = ml_dsa_44::sign_internal(&sk, &mp, &RND).unwrap();
-    assert!(ml_dsa_44::verify_internal(&pk, &mp, &sig));
+    let (pk, sk) = ml_dsa_44::keygen_from_seed(&XI).unwrap();
+    let sig = ml_dsa_44::sign_msg_repr(&sk, &mp, &RND).unwrap();
+    assert!(ml_dsa_44::verify_msg_repr(&pk, &mp, &sig));
 
     println!("// xi (keygen seed):");
     print_arr("XI", &XI);
@@ -40,9 +40,9 @@ fn main() {
     print_arr("SIG", &sig);
 
     // ML-KEM-512 test vector. Deterministic from fixed (d, z, m).
-    let (ek, dk) = ml_kem_512::keygen_internal(&KEM_D, &KEM_Z).unwrap();
-    let (ss_encaps, ct) = ml_kem_512::encaps_internal(&ek, &KEM_M).unwrap();
-    let ss_decaps = ml_kem_512::decaps_internal(&dk, &ct).unwrap();
+    let (ek, dk) = ml_kem_512::keygen_from_seed(&KEM_D, &KEM_Z).unwrap();
+    let (ss_encaps, ct) = ml_kem_512::encaps_from_seed(&ek, &KEM_M).unwrap();
+    let ss_decaps = ml_kem_512::decaps(&dk, &ct).unwrap();
     assert_eq!(ss_encaps, ss_decaps);
 
     println!("// ML-KEM-512 keygen `d` seed:");
@@ -61,9 +61,9 @@ fn main() {
     print_arr("KEM_SS", &ss_encaps);
 
     // ML-DSA-65 deterministic vector.
-    let (pk_65, sk_65) = ml_dsa_65::keygen_internal(&XI).unwrap();
-    let sig_65 = ml_dsa_65::sign_internal(&sk_65, &mp, &RND).unwrap();
-    assert!(ml_dsa_65::verify_internal(&pk_65, &mp, &sig_65));
+    let (pk_65, sk_65) = ml_dsa_65::keygen_from_seed(&XI).unwrap();
+    let sig_65 = ml_dsa_65::sign_msg_repr(&sk_65, &mp, &RND).unwrap();
+    assert!(ml_dsa_65::verify_msg_repr(&pk_65, &mp, &sig_65));
     println!("// ML-DSA-65 pk:");
     print_arr("PK_65", &pk_65);
     println!("// ML-DSA-65 sk:");
@@ -72,9 +72,9 @@ fn main() {
     print_arr("SIG_65", &sig_65);
 
     // ML-DSA-87 deterministic vector.
-    let (pk_87, sk_87) = ml_dsa_87::keygen_internal(&XI).unwrap();
-    let sig_87 = ml_dsa_87::sign_internal(&sk_87, &mp, &RND).unwrap();
-    assert!(ml_dsa_87::verify_internal(&pk_87, &mp, &sig_87));
+    let (pk_87, sk_87) = ml_dsa_87::keygen_from_seed(&XI).unwrap();
+    let sig_87 = ml_dsa_87::sign_msg_repr(&sk_87, &mp, &RND).unwrap();
+    assert!(ml_dsa_87::verify_msg_repr(&pk_87, &mp, &sig_87));
     println!("// ML-DSA-87 pk:");
     print_arr("PK_87", &pk_87);
     println!("// ML-DSA-87 sk:");
@@ -83,12 +83,9 @@ fn main() {
     print_arr("SIG_87", &sig_87);
 
     // ML-KEM-768 deterministic vector.
-    let (ek_768, dk_768) = ml_kem_768::keygen_internal(&KEM_D, &KEM_Z).unwrap();
-    let (ss_768, ct_768) = ml_kem_768::encaps_internal(&ek_768, &KEM_M).unwrap();
-    assert_eq!(
-        ml_kem_768::decaps_internal(&dk_768, &ct_768).unwrap(),
-        ss_768
-    );
+    let (ek_768, dk_768) = ml_kem_768::keygen_from_seed(&KEM_D, &KEM_Z).unwrap();
+    let (ss_768, ct_768) = ml_kem_768::encaps_from_seed(&ek_768, &KEM_M).unwrap();
+    assert_eq!(ml_kem_768::decaps(&dk_768, &ct_768).unwrap(), ss_768);
     println!("// ML-KEM-768 ek:");
     print_arr("KEM768_EK", &ek_768);
     println!("// ML-KEM-768 dk:");
@@ -99,12 +96,9 @@ fn main() {
     print_arr("KEM768_SS", &ss_768);
 
     // ML-KEM-1024 deterministic vector.
-    let (ek_1024, dk_1024) = ml_kem_1024::keygen_internal(&KEM_D, &KEM_Z).unwrap();
-    let (ss_1024, ct_1024) = ml_kem_1024::encaps_internal(&ek_1024, &KEM_M).unwrap();
-    assert_eq!(
-        ml_kem_1024::decaps_internal(&dk_1024, &ct_1024).unwrap(),
-        ss_1024
-    );
+    let (ek_1024, dk_1024) = ml_kem_1024::keygen_from_seed(&KEM_D, &KEM_Z).unwrap();
+    let (ss_1024, ct_1024) = ml_kem_1024::encaps_from_seed(&ek_1024, &KEM_M).unwrap();
+    assert_eq!(ml_kem_1024::decaps(&dk_1024, &ct_1024).unwrap(), ss_1024);
     println!("// ML-KEM-1024 ek:");
     print_arr("KEM1024_EK", &ek_1024);
     println!("// ML-KEM-1024 dk:");

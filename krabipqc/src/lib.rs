@@ -12,7 +12,7 @@
 //! use krabipqc::ml_dsa_44;
 //!
 //! let xi = [0x42u8; 32];
-//! let (pk, sk) = ml_dsa_44::keygen_internal(&xi).unwrap();
+//! let (pk, sk) = ml_dsa_44::keygen_from_seed(&xi).unwrap();
 //!
 //! let rnd = [0xC3u8; 32];
 //! let sig = ml_dsa_44::sign(&sk, b"hello mldsa", b"app-ctx", &rnd).unwrap();
@@ -22,9 +22,9 @@
 //!
 //! For protocols that pre-hash the message (TLS 1.3 CertificateVerify
 //! per `draft-ietf-tls-mldsa`), use `hash_sign` / `hash_verify` with a
-//! [`ml_dsa_44::PreHash`] selector. For low-level control over `M'`,
-//! the `*_internal` variants take the already-constructed `M'` as
-//! `&[u8]`.
+//! [`PreHash`] selector. For low-level control over `M'`,
+//! `sign_msg_repr` / `verify_msg_repr` take the already-constructed
+//! `M'` as `&[u8]`.
 //!
 //! RNG-driven entry points ([`ml_dsa_44::keygen`],
 //! [`ml_dsa_44::sign_random`], [`ml_dsa_44::hash_sign_random`]) take
@@ -41,25 +41,51 @@
 pub(crate) mod blinding;
 pub(crate) mod encoding;
 pub(crate) mod field_ext;
-pub mod hashing;
+pub(crate) mod hashing;
 pub(crate) mod internal;
 mod ml_dsa;
 mod ml_kem;
 pub(crate) mod mlkem;
 pub(crate) mod ntt;
-pub mod params;
-pub mod poly;
-pub mod polyvec;
+pub(crate) mod params;
+pub(crate) mod poly;
+pub(crate) mod polyvec;
 pub(crate) mod rounding;
-pub mod rustcrypto;
+mod rustcrypto;
 pub(crate) mod sampling;
 
 pub use ml_dsa::{ml_dsa_44, ml_dsa_65, ml_dsa_87};
 pub use ml_kem::{ml_kem_512, ml_kem_768, ml_kem_1024};
 
+#[doc(inline)]
 pub use encoding::EncodeError;
-pub use fixed_bigint::{Ct, Nct, Personality};
-pub use modmath::{Field, FieldCt, FieldNct, MontStorage, Residue, ResidueCt, ResidueNct};
+
+// ML-KEM RustCrypto types
+pub use rustcrypto::{Dk512, Dk768, Dk1024, Ek512, Ek768, Ek1024, MlKem512, MlKem768, MlKem1024};
+// ML-DSA RustCrypto types
+pub use rustcrypto::{
+    MlDsa44Signature, MlDsa44Signer, MlDsa44Verifier, MlDsa65Signature, MlDsa65Signer,
+    MlDsa65Verifier, MlDsa87Signature, MlDsa87Signer, MlDsa87Verifier,
+};
+
+/// Pre-hash selector for HashML-DSA ([`ml_dsa_44::hash_sign`] /
+/// [`ml_dsa_44::hash_verify`] and their `-65` / `-87` equivalents).
+/// Carries the externally-computed digest and the OID family the
+/// verifier binds it to.
+///
+/// SHA-256 and SHA-512 cover the digests used by TLS 1.3 + ML-DSA
+/// CertificateVerify (draft-ietf-tls-mldsa). FIPS 204 §5.4 Table 3
+/// also approves SHA3-{256,384,512}, SHA-384, and SHAKE-128/256
+/// pre-hashes; signatures produced with those algorithms cannot be
+/// verified through this API.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum PreHash {
+    /// SHA-256 pre-hash, OID 2.16.840.1.101.3.4.2.1.
+    Sha256([u8; 32]),
+    /// SHA-512 pre-hash, OID 2.16.840.1.101.3.4.2.3.
+    Sha512([u8; 64]),
+}
 
 /// Error returned by the RNG-wrapped `sign_random` /
 /// `hash_sign_random` entry points on each per-set facade.
@@ -73,6 +99,7 @@ pub use modmath::{Field, FieldCt, FieldNct, MontStorage, Residue, ResidueCt, Res
 ///   Unreachable in practice once the per-set facade has pinned sk /
 ///   sig sizes via const generics; surfaced rather than panicked.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum SignError<E> {
     CtxTooLong,
     Rng(E),
@@ -88,6 +115,7 @@ impl<E> From<encoding::EncodeError> for SignError<E> {
 /// Error returned by the RNG-wrapped ML-DSA `keygen` entry point on
 /// each per-set facade.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum KeyGenError<E> {
     Rng(E),
     Encode(encoding::EncodeError),
@@ -104,6 +132,7 @@ impl<E> From<encoding::EncodeError> for KeyGenError<E> {
 /// mismatch that can only fire on internal misuse (the per-set facade
 /// pins all buffer sizes).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum KemError<E> {
     Rng(E),
     Encode(encoding::EncodeError),

@@ -12,13 +12,11 @@ pub const Q_N_PRIME: u32 = 4_236_238_847;
 /// `R^2 mod Q` = `2^64 mod Q`, used by canonical-to-Mont conversion.
 pub const Q_R2_MOD_Q: u32 = 2_365_951;
 
-/// `R mod Q` = `2^32 mod Q`, used as the Mont-form 1.
-pub const Q_R_MOD_Q: u32 = 4_193_792;
-
 /// Polynomial degree.
 pub const N: usize = 256;
 
-/// 512-th principal root of unity mod q used by the NTT.
+/// 512-th principal root of unity mod q; only needed by NTT test oracles.
+#[cfg(test)]
 pub const ZETA: u32 = 1753;
 
 /// 2^d split used in Power2Round.
@@ -129,17 +127,11 @@ pub struct Params<const K: usize, const L: usize> {
     pub gamma1_bits: usize,
     pub gamma2: Gamma2,
     pub omega: usize,
-    pub lambda: usize,
     pub w1_bits: usize,
     pub pk_bytes: usize,
     pub sk_bytes: usize,
     pub sig_bytes: usize,
     pub ctilde_bytes: usize,
-}
-
-impl<const K: usize, const L: usize> Params<K, L> {
-    pub const K: usize = K;
-    pub const L: usize = L;
 }
 
 /// SHAKE-256 expansion buffer for keygen's seed bundle
@@ -182,7 +174,6 @@ pub const ML_DSA_44: Params<4, 4> = Params {
     gamma1_bits: 17,
     gamma2: Gamma2::G88,
     omega: 80,
-    lambda: 128,
     w1_bits: 6,
     pk_bytes: pk_bytes(4),
     sk_bytes: sk_bytes(4, 4, 2),
@@ -199,7 +190,6 @@ pub const ML_DSA_65: Params<6, 5> = Params {
     gamma1_bits: 19,
     gamma2: Gamma2::G32,
     omega: 55,
-    lambda: 192,
     w1_bits: 4,
     pk_bytes: pk_bytes(6),
     sk_bytes: sk_bytes(6, 5, 4),
@@ -216,33 +206,12 @@ pub const ML_DSA_87: Params<8, 7> = Params {
     gamma1_bits: 19,
     gamma2: Gamma2::G32,
     omega: 75,
-    lambda: 256,
     w1_bits: 4,
     pk_bytes: pk_bytes(8),
     sk_bytes: sk_bytes(8, 7, 2),
     sig_bytes: sig_bytes(8, 7, 256, 19, 75),
     ctilde_bytes: 256 / 4,
 };
-
-pub mod ml_dsa_44 {
-    use super::*;
-
-    pub const K: usize = 4;
-    pub const L: usize = 4;
-    pub const ETA: Eta = ML_DSA_44.eta;
-    pub const TAU: usize = ML_DSA_44.tau;
-    pub const BETA: u32 = ML_DSA_44.beta;
-    pub const GAMMA1: u32 = ML_DSA_44.gamma1;
-    pub const GAMMA2: Gamma2 = ML_DSA_44.gamma2;
-    pub const OMEGA: usize = ML_DSA_44.omega;
-    pub const LAMBDA: usize = ML_DSA_44.lambda;
-    pub const GAMMA1_BITS: usize = ML_DSA_44.gamma1_bits;
-    pub const W1_BITS: usize = ML_DSA_44.w1_bits;
-    pub const PK_BYTES: usize = ML_DSA_44.pk_bytes;
-    pub const SK_BYTES: usize = ML_DSA_44.sk_bytes;
-    pub const SIG_BYTES: usize = ML_DSA_44.sig_bytes;
-    pub const CTILDE_BYTES: usize = ML_DSA_44.ctilde_bytes;
-}
 
 #[cfg(test)]
 mod tests {
