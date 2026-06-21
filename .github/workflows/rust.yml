@@ -53,6 +53,9 @@ jobs:
     - name: Test (lowmem)
       run: cargo test --manifest-path=krabipqc/Cargo.toml --release --features lowmem --verbose
 
+    - name: Test (acvp)
+      run: cargo test --manifest-path=krabipqc/Cargo.toml --release --features acvp --verbose
+
     - name: Docs
       run: cargo doc --manifest-path=krabipqc/Cargo.toml --no-deps --release
       env:

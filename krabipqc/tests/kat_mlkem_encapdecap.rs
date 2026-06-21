@@ -1,4 +1,4 @@
-//! ACVP KAT for ML-KEM Encaps_internal / Decaps_internal across all three
+//! ACVP KAT for ML-KEM encaps_from_seed / decaps across all three
 //! parameter sets.
 //!
 //! Vector source: NIST ACVP-Server
@@ -62,7 +62,7 @@ fn acvp_ml_kem_512_encaps_tc1() {
     let (ek_v, m, c_exp, k_exp) = parse_encaps(include_str!("kat_mlkem512_encaps_tc1.txt"));
     let mut ek = [0u8; ml_kem_512::EK_BYTES];
     ek.copy_from_slice(&ek_v);
-    let (ss, ct) = ml_kem_512::encaps_internal(&ek, &m).unwrap();
+    let (ss, ct) = ml_kem_512::encaps_from_seed(&ek, &m).unwrap();
     compare("c", &ct, &c_exp);
     compare("k", &ss, &k_exp);
 }
@@ -71,7 +71,7 @@ fn acvp_ml_kem_768_encaps_tc26() {
     let (ek_v, m, c_exp, k_exp) = parse_encaps(include_str!("kat_mlkem768_encaps_tc26.txt"));
     let mut ek = [0u8; ml_kem_768::EK_BYTES];
     ek.copy_from_slice(&ek_v);
-    let (ss, ct) = ml_kem_768::encaps_internal(&ek, &m).unwrap();
+    let (ss, ct) = ml_kem_768::encaps_from_seed(&ek, &m).unwrap();
     compare("c", &ct, &c_exp);
     compare("k", &ss, &k_exp);
 }
@@ -80,7 +80,7 @@ fn acvp_ml_kem_1024_encaps_tc51() {
     let (ek_v, m, c_exp, k_exp) = parse_encaps(include_str!("kat_mlkem1024_encaps_tc51.txt"));
     let mut ek = [0u8; ml_kem_1024::EK_BYTES];
     ek.copy_from_slice(&ek_v);
-    let (ss, ct) = ml_kem_1024::encaps_internal(&ek, &m).unwrap();
+    let (ss, ct) = ml_kem_1024::encaps_from_seed(&ek, &m).unwrap();
     compare("c", &ct, &c_exp);
     compare("k", &ss, &k_exp);
 }
@@ -92,7 +92,7 @@ fn acvp_ml_kem_512_decaps_tc76() {
     dk.copy_from_slice(&dk_v);
     let mut ct = [0u8; ml_kem_512::CT_BYTES];
     ct.copy_from_slice(&ct_v);
-    let ss = ml_kem_512::decaps_internal(&dk, &ct).unwrap();
+    let ss = ml_kem_512::decaps(&dk, &ct).unwrap();
     compare("k", &ss, &k_exp);
 }
 #[test]
@@ -102,7 +102,7 @@ fn acvp_ml_kem_768_decaps_tc86() {
     dk.copy_from_slice(&dk_v);
     let mut ct = [0u8; ml_kem_768::CT_BYTES];
     ct.copy_from_slice(&ct_v);
-    let ss = ml_kem_768::decaps_internal(&dk, &ct).unwrap();
+    let ss = ml_kem_768::decaps(&dk, &ct).unwrap();
     compare("k", &ss, &k_exp);
 }
 #[test]
@@ -112,6 +112,6 @@ fn acvp_ml_kem_1024_decaps_tc96() {
     dk.copy_from_slice(&dk_v);
     let mut ct = [0u8; ml_kem_1024::CT_BYTES];
     ct.copy_from_slice(&ct_v);
-    let ss = ml_kem_1024::decaps_internal(&dk, &ct).unwrap();
+    let ss = ml_kem_1024::decaps(&dk, &ct).unwrap();
     compare("k", &ss, &k_exp);
 }

@@ -10,6 +10,11 @@ keywords = ["crypto", "post-quantum", "ml-dsa", "ml-kem", "no_std"]
 categories = ["cryptography", "no-std", "no-std::no-alloc"]
 
 [features]
+# Exposes sign_msg_repr / verify_msg_repr for ACVP vector validation.
+# Enable with --features acvp when running the kat_siggen / kat_sigver
+# test suites or the print_vector example.
+acvp = []
+
 # Stack-for-cycles trade on the ML-DSA sign path. Off: s1_hat / s2_hat
 # / t0_hat persist in NTT+Mont form across the kappa loop (cycle-
 # optimized). On: they stay encoded in `sk`, re-decoded + re-NTT'd one
@@ -51,7 +56,13 @@ signature = { version = "3", default-features = false, features = ["rand_core"] 
 # the per-set parameter sets.
 hybrid-array = { version = "0.4", features = ["zeroize", "extra-sizes"] }
 
+[[example]]
+name = "print_vector"
+required-features = ["acvp"]
+
 [dev-dependencies]
+kem = { version = "0.3", features = ["getrandom"] }
+getrandom = { version = "0.4", features = ["sys_rng"] }
 hex = { version = "0.4", default-features = false, features = ["alloc"] }
 serde_json = { version = "1", default-features = false, features = ["alloc"] }
 serde = { version = "1", default-features = false, features = ["derive", "alloc"] }

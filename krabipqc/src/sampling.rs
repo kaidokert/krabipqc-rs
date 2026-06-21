@@ -279,7 +279,7 @@ pub fn expand_s<const K: usize, const L: usize>(
 
 /// ExpandMask (FIPS 204 Alg 34): sample `y` with coefficients in
 /// `(-gamma1, gamma1]`. `mu` is the running kappa counter from
-/// `sign_internal`; row `r`'s seed is `SHAKE256(rho_pp || (mu+r) as 2 bytes)`.
+/// `sign_msg_repr`; row `r`'s seed is `SHAKE256(rho_pp || (mu+r) as 2 bytes)`.
 pub fn expand_mask<const L: usize>(
     rho_pp: &[u8; 64],
     mu: u16,
@@ -334,8 +334,13 @@ pub fn bit_unpack_signed(bytes: &[u8], b: u32, c_bits: usize) -> Result<DPoly, E
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::params::ml_dsa_44::{ETA, GAMMA1, GAMMA1_BITS, K, L, TAU};
-    use crate::params::to_signed;
+    use crate::params::{ML_DSA_44, to_signed};
+    const K: usize = 4;
+    const L: usize = 4;
+    const ETA: crate::params::Eta = ML_DSA_44.eta;
+    const TAU: usize = ML_DSA_44.tau;
+    const GAMMA1: u32 = ML_DSA_44.gamma1;
+    const GAMMA1_BITS: usize = ML_DSA_44.gamma1_bits;
 
     #[test]
     fn coeff_from_three_bytes_basic() {

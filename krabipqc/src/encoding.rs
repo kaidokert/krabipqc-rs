@@ -535,8 +535,11 @@ pub fn sk_decode<const K: usize, const L: usize>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::params::ml_dsa_44::{ETA, GAMMA1, GAMMA1_BITS, W1_BITS};
     use crate::params::{ML_DSA_44, ML_DSA_65, ML_DSA_87, from_signed};
+    const ETA: crate::params::Eta = ML_DSA_44.eta;
+    const GAMMA1: u32 = ML_DSA_44.gamma1;
+    const GAMMA1_BITS: usize = ML_DSA_44.gamma1_bits;
+    const W1_BITS: usize = ML_DSA_44.w1_bits;
 
     #[test]
     fn bitlen_basic() {

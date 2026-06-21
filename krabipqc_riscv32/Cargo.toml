@@ -69,6 +69,9 @@ bench = false
 riscv-rt = "0.13"
 krabipqc = { path = "../krabipqc" }
 modmath = { version = "0.3.1", default-features = false, features = ["wide-mul"] }
+hybrid-array = { version = "0.4", default-features = false }
+kem = { version = "0.3", default-features = false }
+signature = { version = "3", default-features = false }
 
 [profile.release]
 codegen-units = 1

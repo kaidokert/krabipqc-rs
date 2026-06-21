@@ -3,9 +3,9 @@
 //!
 //! Each submodule exposes:
 //! * `EK_BYTES`, `DK_BYTES`, `CT_BYTES`, `SS_BYTES` — fixed-size byte lengths.
-//! * `keygen_internal(d, z)` — FIPS 203 Alg 16.
-//! * `encaps_internal(ek, m)` — FIPS 203 Alg 17.
-//! * `decaps_internal(dk, ct)` — FIPS 203 Alg 18.
+//! * `keygen_from_seed(d, z)` — FIPS 203 Alg 16.
+//! * `encaps_from_seed(ek, m)` — FIPS 203 Alg 17.
+//! * `decaps(dk, ct)` — FIPS 203 Alg 18.
 //!
 //! All three route NTT-domain Mont arithmetic through `wide::ct::mul`
 //! — decaps mixes the dk-derived `K'` with adversary-controlled `ct`,
@@ -26,14 +26,17 @@ macro_rules! per_set {
 
             use crate::mlkem::kem;
             use crate::mlkem::params::{SS_BYTES, $params};
-            use crate::{EncodeError, KemError};
+            use crate::{EncodeError, RandError};
 
             pub const EK_BYTES: usize = $ek;
             pub const DK_BYTES: usize = $dk;
             pub const CT_BYTES: usize = $ct;
             pub use crate::mlkem::params::SS_BYTES as SHARED_SECRET_BYTES;
 
-            pub fn keygen_internal(
+            /// Deterministic ML-KEM KeyGen (FIPS 203 §7.1 Alg 16).
+            /// Takes seeds `d` and `z`; returns `(ek, dk)`.
+            /// Use [`keygen`] when seeds should come from an RNG.
+            pub fn keygen_from_seed(
                 d: &[u8; 32],
                 z: &[u8; 32],
             ) -> Result<([u8; EK_BYTES], [u8; DK_BYTES]), EncodeError> {
@@ -43,7 +46,10 @@ macro_rules! per_set {
                 Ok((ek, dk))
             }
 
-            pub fn encaps_internal(
+            /// Deterministic ML-KEM Encaps (FIPS 203 §7.2 Alg 17).
+            /// Takes seed `m`; returns `(shared_secret, ciphertext)`.
+            /// Use [`encaps`] when `m` should come from an RNG.
+            pub fn encaps_from_seed(
                 ek: &[u8; EK_BYTES],
                 m: &[u8; 32],
             ) -> Result<([u8; SS_BYTES], [u8; CT_BYTES]), EncodeError> {
@@ -53,7 +59,9 @@ macro_rules! per_set {
                 Ok((ss, ct))
             }
 
-            pub fn decaps_internal(
+            /// ML-KEM Decaps (FIPS 203 §7.3 Alg 18). Deterministic:
+            /// no randomness input. Returns the shared secret.
+            pub fn decaps(
                 dk: &[u8; DK_BYTES],
                 ct: &[u8; CT_BYTES],
             ) -> Result<[u8; SS_BYTES], EncodeError> {
@@ -67,12 +75,12 @@ macro_rules! per_set {
             /// RNGs that can fail propagate their error.
             pub fn keygen<R: rand_core::TryCryptoRng + ?Sized>(
                 rng: &mut R,
-            ) -> Result<([u8; EK_BYTES], [u8; DK_BYTES]), KemError<R::Error>> {
+            ) -> Result<([u8; EK_BYTES], [u8; DK_BYTES]), RandError<R::Error>> {
                 let mut d = Zeroizing::new([0u8; 32]);
                 let mut z = Zeroizing::new([0u8; 32]);
-                rng.try_fill_bytes(&mut *d).map_err(KemError::Rng)?;
-                rng.try_fill_bytes(&mut *z).map_err(KemError::Rng)?;
-                Ok(keygen_internal(&d, &z)?)
+                rng.try_fill_bytes(&mut *d).map_err(RandError::Rng)?;
+                rng.try_fill_bytes(&mut *z).map_err(RandError::Rng)?;
+                Ok(keygen_from_seed(&d, &z)?)
             }
 
             /// RNG-driven ML-KEM Encaps. Draws the 32-byte `m` randomness
@@ -80,10 +88,10 @@ macro_rules! per_set {
             pub fn encaps<R: rand_core::TryCryptoRng + ?Sized>(
                 ek: &[u8; EK_BYTES],
                 rng: &mut R,
-            ) -> Result<([u8; SS_BYTES], [u8; CT_BYTES]), KemError<R::Error>> {
+            ) -> Result<([u8; SS_BYTES], [u8; CT_BYTES]), RandError<R::Error>> {
                 let mut m = Zeroizing::new([0u8; 32]);
-                rng.try_fill_bytes(&mut *m).map_err(KemError::Rng)?;
-                Ok(encaps_internal(ek, &m)?)
+                rng.try_fill_bytes(&mut *m).map_err(RandError::Rng)?;
+                Ok(encaps_from_seed(ek, &m)?)
             }
         }
     };
@@ -140,17 +148,17 @@ mod tests {
     fn kem_keygen_random_matches_internal() {
         let mut rng = FixedRng { byte: 0x51 };
         let (ek_r, dk_r) = ml_kem_512::keygen(&mut rng).unwrap();
-        let (ek_d, dk_d) = ml_kem_512::keygen_internal(&[0x51u8; 32], &[0x51u8; 32]).unwrap();
+        let (ek_d, dk_d) = ml_kem_512::keygen_from_seed(&[0x51u8; 32], &[0x51u8; 32]).unwrap();
         assert_eq!(ek_r, ek_d);
         assert_eq!(dk_r, dk_d);
     }
 
     #[test]
     fn kem_encaps_random_roundtrip() {
-        let (ek, dk) = ml_kem_512::keygen_internal(&[0x51u8; 32], &[0x52u8; 32]).unwrap();
+        let (ek, dk) = ml_kem_512::keygen_from_seed(&[0x51u8; 32], &[0x52u8; 32]).unwrap();
         let mut rng = FixedRng { byte: 0x53 };
         let (ss_enc, ct) = ml_kem_512::encaps(&ek, &mut rng).unwrap();
-        let ss_dec = ml_kem_512::decaps_internal(&dk, &ct).unwrap();
+        let ss_dec = ml_kem_512::decaps(&dk, &ct).unwrap();
         assert_eq!(ss_enc, ss_dec);
     }
 }

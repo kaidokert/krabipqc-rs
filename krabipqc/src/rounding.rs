@@ -148,7 +148,8 @@ pub fn use_hint(h: u32, r: u32, gamma2: Gamma2) -> u32 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::params::{from_signed, ml_dsa_44::GAMMA2, to_signed};
+    use crate::params::{ML_DSA_44, from_signed, to_signed};
+    const GAMMA2: crate::params::Gamma2 = ML_DSA_44.gamma2;
 
     #[test]
     fn decompose_recombines() {

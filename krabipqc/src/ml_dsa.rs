@@ -18,13 +18,18 @@ macro_rules! per_set {
 
             use crate::internal;
             use crate::params::$params;
-            use crate::{EncodeError, KeyGenError, SignError};
+            use crate::{EncodeError, RandError, SignError};
+
+            pub use crate::PreHash;
 
             pub const PK_BYTES: usize = $params.pk_bytes;
             pub const SK_BYTES: usize = $params.sk_bytes;
             pub const SIG_BYTES: usize = $params.sig_bytes;
 
-            pub fn keygen_internal(
+            /// Deterministic ML-DSA KeyGen (FIPS 204 §6 Alg 1). Takes
+            /// the raw 32-byte seed `ξ`; returns `(pk, sk)`.
+            /// Use [`keygen`] when the seed should come from an RNG.
+            pub fn keygen_from_seed(
                 xi: &[u8; 32],
             ) -> Result<([u8; PK_BYTES], [u8; SK_BYTES]), EncodeError> {
                 let mut pk = [0u8; PK_BYTES];
@@ -33,7 +38,14 @@ macro_rules! per_set {
                 Ok((pk, sk))
             }
 
-            pub fn sign_internal(
+            /// Low-level ML-DSA Sign (FIPS 204 §6 Alg 2). Takes the
+            /// pre-constructed message representative `M'` directly.
+            /// Most callers want [`sign`] (which builds `M'` from
+            /// `(sk, M, ctx)`) or [`hash_sign`] for HashML-DSA.
+            ///
+            /// Requires the `acvp` crate feature.
+            #[cfg(feature = "acvp")]
+            pub fn sign_msg_repr(
                 sk: &[u8; SK_BYTES],
                 m_prime: &[u8],
                 rnd: &[u8; 32],
@@ -43,7 +55,14 @@ macro_rules! per_set {
                 Ok(sig)
             }
 
-            pub fn verify_internal(
+            /// Low-level ML-DSA Verify (FIPS 204 §6 Alg 3). Takes the
+            /// pre-constructed message representative `M'` directly.
+            /// Most callers want [`verify`] (which builds `M'` from
+            /// `(pk, M, ctx)`) or [`hash_verify`] for HashML-DSA.
+            ///
+            /// Requires the `acvp` crate feature.
+            #[cfg(feature = "acvp")]
+            pub fn verify_msg_repr(
                 pk: &[u8; PK_BYTES],
                 m_prime: &[u8],
                 sig: &[u8; SIG_BYTES],
@@ -96,24 +115,6 @@ macro_rules! per_set {
                 let ctx_len = [ctx.len() as u8];
                 let pieces: &[&[u8]] = &[&prefix, &ctx_len, ctx, m];
                 internal::verify_internal_impl_pieces::<_, _, Nct>(&$params, pk, pieces, sig)
-            }
-
-            /// Pre-hash selector for [`hash_verify`]. Carries the
-            /// externally-computed digest plus the OID family the
-            /// verifier binds it to.
-            ///
-            /// SHA-256 and SHA-512 cover the digests used by current
-            /// TLS 1.3 + ML-DSA CertificateVerify codepoints. FIPS 204
-            /// §5.4 Algorithm 5 also approves SHA3-{256,384,512},
-            /// SHA-384, and SHAKE-128/256 pre-hashes; signatures
-            /// produced with those cannot be verified through this
-            /// API.
-            #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-            pub enum PreHash {
-                /// SHA-256, OID 2.16.840.1.101.3.4.2.1.
-                Sha256([u8; 32]),
-                /// SHA-512, OID 2.16.840.1.101.3.4.2.3.
-                Sha512([u8; 64]),
             }
 
             // FIPS 204 §5.4 Table 3, DER-encoded.
@@ -182,10 +183,10 @@ macro_rules! per_set {
             /// from `rng`; returns `(pk, sk)`.
             pub fn keygen<R: rand_core::TryCryptoRng + ?Sized>(
                 rng: &mut R,
-            ) -> Result<([u8; PK_BYTES], [u8; SK_BYTES]), KeyGenError<R::Error>> {
+            ) -> Result<([u8; PK_BYTES], [u8; SK_BYTES]), RandError<R::Error>> {
                 let mut xi = zeroize::Zeroizing::new([0u8; 32]);
-                rng.try_fill_bytes(&mut *xi).map_err(KeyGenError::Rng)?;
-                Ok(keygen_internal(&xi)?)
+                rng.try_fill_bytes(&mut *xi).map_err(RandError::Rng)?;
+                Ok(keygen_from_seed(&xi)?)
             }
 
             /// RNG-driven pure ML-DSA Sign. Draws the 32-byte `rnd`
@@ -237,6 +238,7 @@ macro_rules! per_set {
             #[cfg(test)]
             mod tests {
                 use super::*;
+                use crate::PreHash;
                 use core::convert::Infallible;
 
                 struct FixedRng(u8);
@@ -262,7 +264,7 @@ macro_rules! per_set {
 
                 #[test]
                 fn hash_sign_verify_sha256() {
-                    let (pk, sk) = keygen_internal(&[0x42u8; 32]).unwrap();
+                    let (pk, sk) = keygen_from_seed(&[0x42u8; 32]).unwrap();
                     let ph = PreHash::Sha256([0x11u8; 32]);
                     let sig = hash_sign(&sk, &ph, b"ctx", &[0xC3u8; 32]).unwrap();
                     assert!(hash_verify(&pk, &ph, b"ctx", &sig));
@@ -272,7 +274,7 @@ macro_rules! per_set {
 
                 #[test]
                 fn hash_sign_verify_sha512() {
-                    let (pk, sk) = keygen_internal(&[0x55u8; 32]).unwrap();
+                    let (pk, sk) = keygen_from_seed(&[0x55u8; 32]).unwrap();
                     let ph = PreHash::Sha512([0x77u8; 64]);
                     let sig = hash_sign(&sk, &ph, b"", &[0xC3u8; 32]).unwrap();
                     assert!(hash_verify(&pk, &ph, b"", &sig));
@@ -280,14 +282,14 @@ macro_rules! per_set {
 
                 #[test]
                 fn sign_random_roundtrip() {
-                    let (pk, sk) = keygen_internal(&[0x42u8; 32]).unwrap();
+                    let (pk, sk) = keygen_from_seed(&[0x42u8; 32]).unwrap();
                     let sig = sign_random(&sk, b"msg", b"", &mut FixedRng(0x77)).unwrap();
                     assert!(verify(&pk, b"msg", b"", &sig));
                 }
 
                 #[test]
                 fn hash_sign_random_roundtrip() {
-                    let (pk, sk) = keygen_internal(&[0x42u8; 32]).unwrap();
+                    let (pk, sk) = keygen_from_seed(&[0x42u8; 32]).unwrap();
                     let ph = PreHash::Sha256([0xABu8; 32]);
                     let sig = hash_sign_random(&sk, &ph, b"", &mut FixedRng(0x77)).unwrap();
                     assert!(hash_verify(&pk, &ph, b"", &sig));
@@ -295,7 +297,7 @@ macro_rules! per_set {
 
                 #[test]
                 fn ctx_too_long_rejected() {
-                    let (pk, sk) = keygen_internal(&[0x42u8; 32]).unwrap();
+                    let (pk, sk) = keygen_from_seed(&[0x42u8; 32]).unwrap();
                     let long = [0u8; 256];
                     let ph = PreHash::Sha256([0u8; 32]);
                     let rnd = [0u8; 32];

@@ -66,6 +66,7 @@ impl Poly<u32> {
     }
 
     /// Coefficient-wise subtraction modulo `modulus`.
+    #[cfg(test)]
     pub fn sub(&self, other: &Self, modulus: u32) -> Self {
         let mut out = Self::zero();
         for i in 0..N {
@@ -75,6 +76,7 @@ impl Poly<u32> {
     }
 
     /// Schoolbook (O(N²)) multiplication in `R_q = Z_q[X]/(X^N + 1)`.
+    #[cfg(test)]
     /// The anticyclic reduction is performed inline: terms that would
     /// overflow degree `N` are subtracted from the low half (`X^N = -1`).
     pub fn schoolbook_mul(&self, other: &Self, modulus: u32) -> Self {
@@ -96,6 +98,7 @@ impl Poly<u32> {
     }
 
     /// Coefficient-wise (Hadamard) multiplication modulo `modulus`.
+    #[cfg(test)]
     ///
     /// Not the right operation for NTT-domain polynomials (which need
     /// the scheme-specific `mul_ntt` arriving with PR2); kept here for

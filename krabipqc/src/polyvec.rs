@@ -40,6 +40,7 @@ impl<T: Zeroize, const LEN: usize> Zeroize for PolyVec<T, LEN> {
 
 impl<const LEN: usize> PolyVec<u32, LEN> {
     /// Element-wise vector addition.
+    #[cfg(test)]
     pub fn add(&self, other: &Self, modulus: u32) -> Self {
         let mut out = Self::zero();
         for i in 0..LEN {
@@ -49,6 +50,7 @@ impl<const LEN: usize> PolyVec<u32, LEN> {
     }
 
     /// Element-wise vector subtraction.
+    #[cfg(test)]
     pub fn sub(&self, other: &Self, modulus: u32) -> Self {
         let mut out = Self::zero();
         for i in 0..LEN {
