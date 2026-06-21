@@ -558,7 +558,7 @@ impl<P: MlKemParams> TryDecapsulate for Dk<P> {
 // ML-DSA generic types
 // ============================================================================
 
-use signature::{Error as SigError, Keypair, RandomizedSigner, Signer, Verifier};
+use signature::{Error as SigError, Keypair, RandomizedSigner, Verifier};
 
 /// Byte-encoded ML-DSA signature.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -654,14 +654,6 @@ impl<P: MlDsaParams> Keypair for MlDsaSigner<P> {
     }
 }
 
-impl<P: MlDsaParams> Signer<MlDsaSignature<P>> for MlDsaSigner<P> {
-    fn try_sign(&self, msg: &[u8]) -> Result<MlDsaSignature<P>, SigError> {
-        let rnd = [0u8; 32]; // deterministic; ctx = empty
-        let bytes = P::dsa_sign(&self.sk, msg, &[], &rnd).map_err(|_| SigError::new())?;
-        Ok(MlDsaSignature(bytes))
-    }
-}
-
 impl<P: MlDsaParams> RandomizedSigner<MlDsaSignature<P>> for MlDsaSigner<P> {
     fn try_sign_with_rng<R: TryCryptoRng + ?Sized>(
         &self,
@@ -736,7 +728,7 @@ mod tests {
         let verifier = signer.verifying_key();
 
         let msg = b"hello pqc traits";
-        let sig: MlDsaSignature<MlDsa44> = signer.sign(msg);
+        let sig: MlDsaSignature<MlDsa44> = signer.sign_with_rng(&mut FixedRng(0x55), msg);
         verifier.verify(msg, &sig).expect("verify should pass");
 
         let wrong = b"hello rust crypto";
@@ -826,7 +818,7 @@ mod tests {
     fn mldsa44_sig_conversions() {
         let mut rng = FixedRng(0x42);
         let signer = MlDsaSigner::<MlDsa44>::try_generate_from_rng(&mut rng).unwrap();
-        let sig: MlDsaSignature<MlDsa44> = signer.sign(b"test");
+        let sig: MlDsaSignature<MlDsa44> = signer.sign_with_rng(&mut FixedRng(0x55), b"test");
 
         // AsRef<[u8]>
         let bytes: &[u8] = sig.as_ref();
@@ -855,7 +847,7 @@ mod tests {
         // KeyInit
         let vk2 = MlDsaVerifier::<MlDsa44>::new(&pk_bytes);
 
-        let sig: MlDsaSignature<MlDsa44> = signer.sign(b"hello");
+        let sig: MlDsaSignature<MlDsa44> = signer.sign_with_rng(&mut FixedRng(0x55), b"hello");
         vk2.verify(b"hello", &sig).unwrap();
     }
 
@@ -871,7 +863,8 @@ mod tests {
         // Debug
         let _ = std::format!("{:?}", signer);
 
-        let sig: MlDsaSignature<MlDsa44> = signer.sign(b"from_keypair");
+        let sig: MlDsaSignature<MlDsa44> =
+            signer.sign_with_rng(&mut FixedRng(0x55), b"from_keypair");
         vk.verify(b"from_keypair", &sig).unwrap();
     }
 
@@ -882,9 +875,9 @@ mod tests {
         let signer = MlDsaSigner::<MlDsa87>::try_generate_from_rng(&mut rng).unwrap();
         let vk = signer.verifying_key();
         let msg = b"ml-dsa-87 via traits";
-        let sig: MlDsaSignature<MlDsa87> = signer.sign(msg);
+        let sig: MlDsaSignature<MlDsa87> = signer.sign_with_rng(&mut FixedRng(0x55), msg);
         vk.verify(msg, &sig).unwrap();
-        let sig2: MlDsaSignature<MlDsa87> = signer.sign_with_rng(&mut FixedRng(0x55), msg);
+        let sig2: MlDsaSignature<MlDsa87> = signer.sign_with_rng(&mut FixedRng(0x66), msg);
         vk.verify(msg, &sig2).unwrap();
     }
 }

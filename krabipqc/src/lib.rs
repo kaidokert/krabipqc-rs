@@ -9,14 +9,14 @@
 //! ```ignore
 //! use krabipqc::{MlDsaSigner, MlDsaVerifier, MlDsa44};
 //! use kem::common::Generate;
-//! use signature::{Signer, Verifier};
+//! use signature::{RandomizedSigner, Verifier};
 //!
 //! // Key generation (RNG-driven; fixed seed via ml_dsa_44::keygen_from_seed).
 //! let mut rng = /* your TryCryptoRng */;
 //! let signer: MlDsaSigner<MlDsa44> = MlDsaSigner::try_generate_from_rng(&mut rng).unwrap();
 //! let verifier: MlDsaVerifier<MlDsa44> = signer.verifying_key();
 //!
-//! let sig = signer.sign(b"hello mldsa");
+//! let sig = signer.try_sign_with_rng(&mut rng, b"hello mldsa").unwrap();
 //! verifier.verify(b"hello mldsa", &sig).unwrap();
 //! ```
 //!

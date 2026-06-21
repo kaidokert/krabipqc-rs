@@ -6,22 +6,15 @@
 //! (would otherwise inflate the sign metric by the verify cost).
 
 use cortex_m_rt::entry;
+use krabipqc::ml_dsa_44;
 use krabipqc_cortex_m3::test_fixture;
-use krabipqc_cortex_m3::test_vector::{MESSAGE, RND, SK};
+use krabipqc_cortex_m3::test_vector::{MESSAGE, RND, SIG, SK};
 
 fn sign() -> bool {
-    let mut m_prime = [0u8; 256];
-    m_prime[0] = 0x00;
-    m_prime[1] = 0x00;
-    let len = 2 + MESSAGE.len();
-    let Some(slot) = m_prime.get_mut(2..len) else {
-        return false;
-    };
-    slot.copy_from_slice(MESSAGE);
-    let Some(slice) = m_prime.get(..len) else {
-        return false;
-    };
-    krabipqc::ml_dsa_44::sign_internal(&SK, slice, &RND).is_ok()
+    match ml_dsa_44::sign(&SK, MESSAGE, &[], &RND) {
+        Ok(sig) => sig == SIG,
+        Err(_) => false,
+    }
 }
 
 #[entry]

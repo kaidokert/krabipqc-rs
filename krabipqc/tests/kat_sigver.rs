@@ -1,3 +1,4 @@
+#![cfg(feature = "acvp")]
 //! ACVP KAT for ML-DSA-{44,65,87} verify_msg_repr (message representative).
 //!
 //! Vector source: NIST ACVP-Server ML-DSA-sigVer-FIPS204

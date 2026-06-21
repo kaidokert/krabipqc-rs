@@ -42,6 +42,9 @@ macro_rules! per_set {
             /// pre-constructed message representative `M'` directly.
             /// Most callers want [`sign`] (which builds `M'` from
             /// `(sk, M, ctx)`) or [`hash_sign`] for HashML-DSA.
+            ///
+            /// Requires the `acvp` crate feature.
+            #[cfg(feature = "acvp")]
             pub fn sign_msg_repr(
                 sk: &[u8; SK_BYTES],
                 m_prime: &[u8],
@@ -56,6 +59,9 @@ macro_rules! per_set {
             /// pre-constructed message representative `M'` directly.
             /// Most callers want [`verify`] (which builds `M'` from
             /// `(pk, M, ctx)`) or [`hash_verify`] for HashML-DSA.
+            ///
+            /// Requires the `acvp` crate feature.
+            #[cfg(feature = "acvp")]
             pub fn verify_msg_repr(
                 pk: &[u8; PK_BYTES],
                 m_prime: &[u8],
