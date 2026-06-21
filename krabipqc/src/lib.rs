@@ -61,11 +61,10 @@ pub use ml_kem::{ml_kem_512, ml_kem_768, ml_kem_1024};
 pub use encoding::EncodeError;
 
 // ML-KEM RustCrypto types
-pub use rustcrypto::{Dk512, Dk768, Dk1024, Ek512, Ek768, Ek1024, MlKem512, MlKem768, MlKem1024};
+pub use rustcrypto::{Dk, Ek, MlKem, MlKem512, MlKem768, MlKem1024, MlKemParams};
 // ML-DSA RustCrypto types
 pub use rustcrypto::{
-    MlDsa44Signature, MlDsa44Signer, MlDsa44Verifier, MlDsa65Signature, MlDsa65Signer,
-    MlDsa65Verifier, MlDsa87Signature, MlDsa87Signer, MlDsa87Verifier,
+    MlDsa44, MlDsa65, MlDsa87, MlDsaParams, MlDsaSignature, MlDsaSigner, MlDsaVerifier,
 };
 
 /// Pre-hash selector for HashML-DSA ([`ml_dsa_44::hash_sign`] /
