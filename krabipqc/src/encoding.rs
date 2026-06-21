@@ -99,8 +99,7 @@ pub(crate) fn simple_bit_unpack(bytes: &[u8], c_bits: usize) -> Result<Poly<u32>
     Ok(out)
 }
 
-/// BitUnpack (FIPS 204 Alg 19). Thin wrapper over
-/// [`bit_unpack_signed`] kept in this module for naming symmetry.
+/// BitUnpack (FIPS 204 Alg 19).
 pub(crate) fn bit_unpack(bytes: &[u8], b: u32, c_bits: usize) -> Result<Poly<u32>, EncodeError> {
     bit_unpack_signed(bytes, b, c_bits)
 }
@@ -181,18 +180,9 @@ fn sk_t0_packing() -> (u32, usize) {
 
 /// Decode `s1` / `s2` / `t0` from `sk` straight into the caller's NTT
 /// slots, in canonical (pre-NTT) form. Bypasses the whole-sk
-/// `DecodedSk` tuple — which would stage a second copy of the secrets
-/// on the stack — and walks the key body one row at a time with
-/// [`<[u8]>::split_at_checked`] rather than computing absolute byte
-/// offsets. There is therefore no `i * chunk` / `off + chunk`
-/// arithmetic to overflow: every step advances the cursor by one
-/// chunk (sizes are `saturating_mul` so a degenerate parameter set
-/// caps out instead of wrapping) and a short key surfaces as
-/// `BufferTooSmall` instead of panicking.
-///
-/// The `lowmem` sign path re-derives rows on demand via
-/// [`SkSecretReader`] instead, so this whole-secret decode is the
-/// default path only.
+/// `DecodedSk` tuple to avoid staging a second copy of the secrets on
+/// the stack. The `lowmem` sign path re-derives rows on demand via
+/// [`SkSecretReader`] instead.
 #[cfg(not(feature = "lowmem"))]
 pub(crate) fn decode_sk_secrets<const K: usize, const L: usize>(
     params: &Params<K, L>,
@@ -275,8 +265,7 @@ impl<'a> SkSecretReader<'a> {
         let (s2, rest) = rest
             .split_at_checked(s_chunk.saturating_mul(K))
             .ok_or(EncodeError::BufferTooSmall)?;
-        // Carve t0 to exactly K rows too, so a truncated key fails here
-        // rather than later inside `t0_row`.
+        // Carve t0 to exactly K rows so a truncated key fails here.
         let (t0, _) = rest
             .split_at_checked(t0_chunk.saturating_mul(K))
             .ok_or(EncodeError::BufferTooSmall)?;
@@ -389,10 +378,7 @@ pub fn validate_hint_bytes<const K: usize>(hint: &[u8], omega: usize) -> bool {
     true
 }
 
-/// Decoded secret-key components produced by [`sk_decode`]. The sign
-/// path decodes rows individually via `sk_s1_row` / `sk_s2_row` /
-/// `sk_t0_row`, so the whole-sk decode is exercised only by the
-/// round-trip tests — hence `#[cfg(test)]`.
+/// Round-trip test helper; the sign path decodes rows individually.
 #[cfg(test)]
 pub type DecodedSk<const K: usize, const L: usize> = (
     [u8; 32],
@@ -412,7 +398,6 @@ pub fn pk_encode<const K: usize>(
     out.get_mut(..32)
         .ok_or(EncodeError::BufferTooSmall)?
         .copy_from_slice(rho);
-    // bitlen(q-1) - d = 23 - 13 = 10.
     let c_bits = 10;
     let chunk = 32 * c_bits;
     for i in 0..K {

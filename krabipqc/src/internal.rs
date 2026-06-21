@@ -140,9 +140,6 @@ where
         return Err(encoding::EncodeError::BufferTooSmall);
     }
 
-    // Lift the public header (rho / big_k / tr) out of `sk`; the
-    // secrets are handled below. Everything secret-derived is
-    // zeroize-on-drop; `rho` is public.
     let mut rho = [0u8; 32];
     let mut big_k = Zeroizing::new([0u8; 32]);
     let mut tr = Zeroizing::new([0u8; 64]);
@@ -487,9 +484,6 @@ where
 
     let two_d = 1u32 << D;
 
-    // Pack `w1` rows straight into the challenge-hash input so the
-    // matrix-vector loop never materializes a `PolyVec<K>` worth
-    // (~4 KiB) of scratch.
     let mut w1_buf = [0u8; MAX_W1_PACKED_BYTES];
     let w1_len = K * 32 * params.w1_bits;
     let w1_packed = &mut w1_buf[..w1_len];

@@ -12,6 +12,20 @@ Prototype `no_std` ML-DSA and ML-KEM for microcontrollers.
 - ML-KEM: `ml_kem_512`, `ml_kem_768`, `ml_kem_1024` — keygen / encaps / decaps.
 - no unsafe, no heap, no `alloc`
 
+## Footprint
+
+Measured under QEMU. `.text` is the linked example binary size; stack is the peak high-water mark. Larger
+parameter sets scale up proportionally.
+
+| Operation                    | Cortex-M3 .text | Cortex-M3 stack | RISC-V .text | RISC-V stack |
+|------------------------------|----------------:|----------------:|-------------:|-------------:|
+| ML-DSA-44 verify             |        14.5 KiB |       23 868 B  |    17.2 KiB  |    23 736 B  |
+| ML-DSA-44 sign (`lowmem`)    |        16.5 KiB |       67 956 B  |    20.3 KiB  |    67 940 B  |
+| ML-KEM-512 decaps            |        17.8 KiB |       28 156 B  |    21.7 KiB  |    28 116 B  |
+
+Default sign peak is ~80 KiB stack; `lowmem` re-derives NTT vectors per retry
+to bring it down to ~68 KiB at the cost of extra cycles on rejection.
+
 ## Status
 
 Very experimental. APIs will change; side-channel properties are not analyzed; not audited. Do not use for anything that matters.

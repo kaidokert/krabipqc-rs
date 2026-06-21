@@ -23,9 +23,7 @@ pub const ZETA: u32 = 1753;
 pub const D: u32 = 13;
 
 // ML-DSA stores canonical `[0, q)` reps but reasons about norms in
-// centered `(-q/2, q/2]` form. The three branchless conversions below
-// are written with mask selects so per-coefficient timing is
-// data-independent.
+// centered `(-q/2, q/2]` form.
 
 /// Centered `(-q/2, q/2]` → canonical `[0, q)`. Correct for
 /// `|x| < 2*q`; all in-tree callers pass `|x| < q`.
@@ -135,14 +133,14 @@ pub struct Params<const K: usize, const L: usize> {
 }
 
 /// SHAKE-256 expansion buffer for keygen's seed bundle
-/// `(rho | rho_prime | big_k)` = 32 + 64 + 32 bytes.
+/// `(rho | rho_prime | big_k)`.
 pub const SEED_EXPAND_BYTES: usize = 128;
 
 /// Worst-case ctilde length across all three sets (`lambda/4` at
 /// `lambda = 256`).
 pub const MAX_CTILDE_BYTES: usize = 64;
 
-/// Worst-case packed-w1 length across all three sets (`K * 32 * w1_bits`).
+/// Worst-case packed-w1 length across all three sets.
 pub const MAX_W1_PACKED_BYTES: usize = 1024;
 
 const fn eta_bits(eta: u32) -> usize {

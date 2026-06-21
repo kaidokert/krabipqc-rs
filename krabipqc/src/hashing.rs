@@ -8,8 +8,7 @@ use sha3::{Sha3_256, Sha3_512, Shake128, Shake256};
 pub struct Shake128Stream(sha3::Shake128Reader);
 
 impl Shake128Stream {
-    /// SHAKE-128 rate in bytes (= (1600 - 2*128) / 8). One Keccak-f
-    /// permutation produces this many bytes of output.
+    /// SHAKE-128 rate in bytes (= (1600 - 2*128) / 8).
     pub const RATE: usize = 168;
 
     pub fn new(inputs: &[&[u8]]) -> Self {
@@ -29,8 +28,7 @@ impl Shake128Stream {
 pub struct Shake256Stream(sha3::Shake256Reader);
 
 impl Shake256Stream {
-    /// SHAKE-256 rate in bytes (= (1600 - 2*256) / 8). One Keccak-f
-    /// permutation produces this many bytes of output.
+    /// SHAKE-256 rate in bytes (= (1600 - 2*256) / 8).
     pub const RATE: usize = 136;
 
     pub fn new(inputs: &[&[u8]]) -> Self {
@@ -90,7 +88,6 @@ mod tests {
     fn shake256_empty_short() {
         let mut out = [0u8; 16];
         shake256(&[b""], &mut out);
-        // First 16 bytes of SHAKE256("") per NIST test vectors.
         assert_eq!(
             out,
             [
@@ -104,7 +101,6 @@ mod tests {
     fn shake128_empty_short() {
         let mut out = [0u8; 16];
         shake128(&[b""], &mut out);
-        // First 16 bytes of SHAKE128("") per NIST test vectors.
         assert_eq!(
             out,
             [

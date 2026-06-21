@@ -1,12 +1,6 @@
 //! Per-parameter-set wrappers (ML-KEM-512, ML-KEM-768, ML-KEM-1024) over the
 //! generic [`crate::mlkem::kem`] functions.
 //!
-//! Each submodule exposes:
-//! * `EK_BYTES`, `DK_BYTES`, `CT_BYTES`, `SS_BYTES` — fixed-size byte lengths.
-//! * `keygen_from_seed(d, z)` — FIPS 203 Alg 16.
-//! * `encaps_from_seed(ek, m)` — FIPS 203 Alg 17.
-//! * `decaps(dk, ct)` — FIPS 203 Alg 18.
-//!
 //! All three route NTT-domain Mont arithmetic through `wide::ct::mul`
 //! — decaps mixes the dk-derived `K'` with adversary-controlled `ct`,
 //! and encaps/keygen consume secret randomness, so a variable-time
@@ -60,7 +54,7 @@ macro_rules! per_set {
             }
 
             /// ML-KEM Decaps (FIPS 203 §7.3 Alg 18). Deterministic:
-            /// no randomness input. Returns the shared secret.
+            /// no randomness input.
             pub fn decaps(
                 dk: &[u8; DK_BYTES],
                 ct: &[u8; CT_BYTES],

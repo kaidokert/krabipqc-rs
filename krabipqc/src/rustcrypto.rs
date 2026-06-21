@@ -26,17 +26,9 @@ use kem::{
 use rand_core::{CryptoRng, TryCryptoRng};
 use zeroize::Zeroizing;
 
-// ============================================================================
-// Sealed trait — prevents external impls of MlKemParams / MlDsaParams
-// ============================================================================
-
 mod private {
     pub trait Sealed {}
 }
-
-// ============================================================================
-// ML-KEM parameter trait
-// ============================================================================
 
 /// Sealed trait implemented by the ML-KEM parameter-set marker types
 /// ([`MlKem512`], [`MlKem768`], [`MlKem1024`]). Carries the associated buffer
@@ -84,10 +76,6 @@ pub trait MlKemParams:
     #[doc(hidden)]
     fn kem_ek_offset() -> usize;
 }
-
-// ============================================================================
-// ML-DSA parameter trait
-// ============================================================================
 
 /// Sealed trait implemented by the ML-DSA parameter-set marker types
 /// ([`MlDsa44`], [`MlDsa65`], [`MlDsa87`]). Carries the associated buffer
@@ -141,10 +129,6 @@ pub trait MlDsaParams:
         sig: &Array<u8, Self::SigSize>,
     ) -> bool;
 }
-
-// ============================================================================
-// ML-KEM parameter-set marker types + impls
-// ============================================================================
 
 /// Parameter-set marker for ML-KEM-512 (`k = 2`).
 #[derive(Copy, Clone, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
@@ -269,10 +253,6 @@ impl MlKemParams for MlKem1024 {
         1536
     }
 }
-
-// ============================================================================
-// ML-DSA parameter-set marker types + impls
-// ============================================================================
 
 /// Parameter-set marker for ML-DSA-44 (`k = 4`, `l = 4`).
 #[derive(Copy, Clone, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
@@ -419,10 +399,6 @@ impl MlDsaParams for MlDsa87 {
     }
 }
 
-// ============================================================================
-// ML-KEM generic types
-// ============================================================================
-
 /// `kem::Kem` marker for ML-KEM. Use `MlKem<MlKem512>` etc. in generic
 /// contexts that require a `K: Kem` bound. For direct key construction,
 /// `Dk<MlKem512>::try_generate_from_rng` is more ergonomic.
@@ -520,9 +496,7 @@ impl<P: MlKemParams> TryKeyInit for Dk<P> {
 
 impl<P: MlKemParams> Generate for Dk<P> {
     fn try_generate_from_rng<R: TryCryptoRng + ?Sized>(rng: &mut R) -> Result<Self, R::Error> {
-        // The trait error type is fixed to R::Error; draw seeds locally so
-        // the structurally-unreachable EncodeError arm stays out of the
-        // trait's error channel.
+        // structurally-unreachable EncodeError can't flow through R::Error.
         let mut d = Zeroizing::new([0u8; 32]);
         let mut z = Zeroizing::new([0u8; 32]);
         rng.try_fill_bytes(&mut *d)?;
@@ -555,10 +529,6 @@ impl<P: MlKemParams> TryDecapsulate for Dk<P> {
         P::kem_decaps(&self.sk, ct)
     }
 }
-
-// ============================================================================
-// ML-DSA generic types
-// ============================================================================
 
 use signature::{Error as SigError, Keypair, RandomizedSigner, Verifier};
 
@@ -669,9 +639,6 @@ impl<P: MlDsaParams> RandomizedSigner<MlDsaSignature<P>> for MlDsaSigner<P> {
 
 impl<P: MlDsaParams> Generate for MlDsaSigner<P> {
     fn try_generate_from_rng<R: TryCryptoRng + ?Sized>(rng: &mut R) -> Result<Self, R::Error> {
-        // Same shape as the ML-KEM Dk Generate impl: bypass the facade's
-        // RandError-returning keygen so the structurally-unreachable
-        // Encode arm doesn't have to squeeze through R::Error.
         let mut xi = Zeroizing::new([0u8; 32]);
         rng.try_fill_bytes(&mut *xi)?;
         // TODO: drop .expect — trait's R::Error can't carry EncodeError without a breaking where bound.
@@ -689,10 +656,7 @@ mod tests {
     use super::*;
     use core::convert::Infallible;
 
-    /// Deterministic fixed RNG so tests stay reproducible. Implements
-    /// `TryCryptoRng<Error = Infallible>`, which rand_core's blanket
-    /// impls lift to `CryptoRng` for the trait methods bounded on the
-    /// infallible variant.
+    /// Deterministic fixed RNG so tests stay reproducible.
     struct FixedRng(u8);
     impl rand_core::TryRng for FixedRng {
         type Error = Infallible;
@@ -788,9 +752,7 @@ mod tests {
         let dk = Dk::<MlKem512>::try_generate_from_rng(&mut rng).unwrap();
         let sk_bytes: Array<u8, sizes::U1632> = *dk.sk;
         let dk2 = <Dk<MlKem512> as TryKeyInit>::new(&sk_bytes).unwrap();
-        // Dk::Debug
         let _ = std::format!("{:?}", dk2);
-        // Ek::to_bytes (KeyExport)
         let _ = dk2.encapsulation_key().to_bytes();
     }
 
@@ -822,18 +784,14 @@ mod tests {
         let signer = MlDsaSigner::<MlDsa44>::try_generate_from_rng(&mut rng).unwrap();
         let sig: MlDsaSignature<MlDsa44> = signer.sign_with_rng(&mut FixedRng(0x55), b"test");
 
-        // AsRef<[u8]>
         let bytes: &[u8] = sig.as_ref();
 
-        // TryFrom<&[u8]> success
         let sig2 = MlDsaSignature::<MlDsa44>::try_from(bytes).unwrap();
         assert_eq!(sig, sig2);
 
-        // From<Array<u8, _>>
         let arr = Array::<u8, sizes::U2420>::default();
         let _ = MlDsaSignature::<MlDsa44>::from(arr);
 
-        // TryFrom<&[u8]> failure on wrong length
         assert!(MlDsaSignature::<MlDsa44>::try_from(&[0u8; 42][..]).is_err());
     }
 
@@ -844,9 +802,7 @@ mod tests {
         let signer = MlDsaSigner::<MlDsa44>::try_generate_from_rng(&mut rng).unwrap();
         let vk = signer.verifying_key();
 
-        // KeyExport
         let pk_bytes = vk.to_bytes();
-        // KeyInit
         let vk2 = MlDsaVerifier::<MlDsa44>::new(&pk_bytes);
 
         let sig: MlDsaSignature<MlDsa44> = signer.sign_with_rng(&mut FixedRng(0x55), b"hello");
@@ -862,7 +818,6 @@ mod tests {
         let signer = MlDsaSigner::<MlDsa44>::from_keypair(&sk_arr, &pk_arr);
         let vk = signer.verifying_key();
 
-        // Debug
         let _ = std::format!("{:?}", signer);
 
         let sig: MlDsaSignature<MlDsa44> =

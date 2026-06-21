@@ -16,8 +16,6 @@ use crate::mlkem::params::ZETA;
 use crate::mlkem::params::{N, Q, Q_N_PRIME, Q_R2_MOD_Q};
 use crate::poly::Poly;
 
-// Per-call ML-KEM-specific Mont shims so the NTT bodies don't repeat the
-// modulus / n_prime constants on every call.
 #[inline]
 fn reduce<P: FieldExt<P> + Personality>(x: u32) -> u32 {
     <P as FieldExt<P>>::reduce(x, Q, Q_N_PRIME, Q_R2_MOD_Q)
@@ -36,8 +34,7 @@ fn sub_mont<P: FieldExt<P> + Personality>(a: u32, b: u32) -> u32 {
 }
 
 /// Bit-reverse the low 7 bits of `i`. Used by the [`ZETAS_MONT`] /
-/// [`GAMMAS_MONT`] cross-checks; the NTT bodies index the precomputed
-/// tables directly.
+/// [`GAMMAS_MONT`] cross-checks.
 #[cfg(test)]
 #[inline]
 const fn bitrev7(mut i: u32) -> u32 {
@@ -141,8 +138,7 @@ pub const GAMMAS_MONT: [u32; 128] = [
    1877,    1452,    2887,     442,    2294,    1035,    1487,    1842,
 ];
 
-/// 128^-1 mod 3329 = 3303 (used at the end of inv_ntt to undo the
-/// magnitude doubling from 7 NTT layers).
+/// 128^-1 mod 3329 = 3303 — undoes the magnitude doubling from 7 NTT layers.
 pub const N_INV_128: u32 = 3303;
 
 /// Recompute the ZETAS table via modmath. Test-only cross-check of
@@ -279,8 +275,7 @@ pub fn mul_ntt_acc<const K: usize, P: Personality + FieldExt<P>>(
             (c1_lo, c1_hi) = <P as FieldExt<P>>::mul_acc(c1_lo, c1_hi, a1, b0);
         }
         // γ is loop-invariant, so fold the Σ a1·b1 collapse and the γ
-        // scale into a single REDC + mul_mont after the j loop —
-        // O(1) instead of O(K) per output coefficient.
+        // scale into a single REDC + mul_mont after the j loop.
         let a0b0 = <P as FieldExt<P>>::redc(a0b0_lo, a0b0_hi, Q, Q_N_PRIME);
         let a1b1 = <P as FieldExt<P>>::redc(a1b1_lo, a1b1_hi, Q, Q_N_PRIME);
         let a1b1g = mul_mont_p::<P>(a1b1, gamma_mont);

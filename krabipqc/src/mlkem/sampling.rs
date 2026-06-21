@@ -79,8 +79,7 @@ pub fn sample_poly_cbd(bytes: &[u8], eta: Eta) -> Result<Poly<u32>, EncodeError>
 
 /// One PRF_eta + SamplePolyCBD_eta step: SHAKE-256-squeeze `eta.buf_len()`
 /// bytes from `s || b` and run them through the centered binomial
-/// distribution. Inlines the buffer so callers don't move a
-/// [`PRF_BUF_LEN`]-byte array around by value.
+/// distribution. Callers don't move a [`PRF_BUF_LEN`]-byte array around by value.
 fn sample_cbd_from_seed(s: &[u8; 32], b: u8, eta: Eta) -> Result<Poly<u32>, EncodeError> {
     // The squeezed bytes become CBD-sampled secret coefficients, so
     // wrap the scratch buffer in Zeroizing to clear it on return.
@@ -107,7 +106,6 @@ pub fn expand_a<const K: usize>(rho: &[u8; 32]) -> PolyMatrix<u32, K, K> {
 /// Sample s and e — K-PKE.KeyGen step (FIPS 203 Alg 12 lines 7-12):
 /// s_i = SamplePolyCBD_eta1(PRF_eta1(sigma, N))
 /// e_i = SamplePolyCBD_eta1(PRF_eta1(sigma, N + K))
-/// with N starting at 0 and incrementing.
 pub fn sample_se<const K: usize>(
     sigma: &[u8; 32],
     eta1: Eta,

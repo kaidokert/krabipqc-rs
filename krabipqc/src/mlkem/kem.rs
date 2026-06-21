@@ -76,9 +76,8 @@ where
     ek_modulus_check::<K>(t_hat_bytes)?;
 
     let h_ek = sha3_256(&[ek]);
-    // g_out splits into (ss, r): both are secret-derived (ss is the
-    // shared secret, r is the FO encryption coin). Match
-    // decaps_internal_impl's hygiene by Zeroizing both.
+    // g_out splits into (ss, r): both are secret-derived; Zeroizing both
+    // matches decaps_internal_impl's hygiene.
     let g_out = Zeroizing::new(sha3_512(&[m, &h_ek]));
     let ss_src = g_out.get(..32).ok_or(EncodeError::BufferTooSmall)?;
     ss_out.copy_from_slice(ss_src);
@@ -205,10 +204,8 @@ mod tests {
         );
     }
 
-    /// Cross-personality equivalence: same seeds/randomness through the
-    /// Nct and Ct paths must produce byte-identical `ek`, `dk`, `ss`,
-    /// and `ct`. Load-bearing for routing the per-set facade through
-    /// `Ct` without diverging on output bytes.
+    /// Load-bearing for routing the per-set facade through `Ct` without
+    /// diverging on output bytes.
     fn cross_personality_equiv<const K: usize>(params: &Params<K>) {
         let d = [0x5Au8; 32];
         let z = [0xA5u8; 32];
@@ -266,7 +263,6 @@ mod tests {
         let mut dk = vec![0u8; params.dk_bytes];
         keygen_internal_impl::<3, Nct>(params, &d, &z, &mut ek, &mut dk).unwrap();
 
-        // First coefficient is `ek[0] | ((ek[1] & 0x0F) << 8)`; force to 0xFFF.
         ek[0] = 0xFF;
         ek[1] = (ek[1] & 0xF0) | 0x0F;
 
@@ -291,8 +287,7 @@ mod tests {
         let mut ct = vec![0u8; params.ct_bytes];
         encaps_internal_impl::<3, Nct>(params, &ek, &[3u8; 32], &mut ss_enc, &mut ct).unwrap();
 
-        // Flip a bit and re-decaps — should yield the implicit-rejection key,
-        // not the original shared secret.
+        // should yield the implicit-rejection key, not the original shared secret.
         ct[0] ^= 1;
         let mut ss_dec = [0u8; SS_BYTES];
         decaps_internal_impl::<3, Nct>(params, &dk, &ct, &mut ss_dec).unwrap();

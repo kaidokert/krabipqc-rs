@@ -34,13 +34,6 @@
 //! [`ml_dsa_44::sign_random`], [`ml_dsa_44::hash_sign_random`]) take
 //! a [`rand_core::TryCryptoRng`] so fallible embedded HW RNGs
 //! propagate their error type via [`SignError::Rng`].
-//!
-//! KeyGen and Sign route NTT-domain Mont arithmetic through
-//! `wide::ct::mul` ([`subtle::ConditionallySelectable`] for the
-//! conditional subtractions); Verify uses the variable-time finalize
-//! because its inputs are public. Time-domain post-processing
-//! (rejection samplers, the `% gamma2` operations) is not yet
-//! constant-time — the Ct path is a partial guarantee.
 
 pub(crate) mod blinding;
 pub(crate) mod encoding;
@@ -64,9 +57,7 @@ pub use ml_kem::{ml_kem_512, ml_kem_768, ml_kem_1024};
 #[doc(inline)]
 pub use encoding::EncodeError;
 
-// ML-KEM RustCrypto types
 pub use rustcrypto::{Dk, Ek, MlKem, MlKem512, MlKem768, MlKem1024, MlKemParams};
-// ML-DSA RustCrypto types
 pub use rustcrypto::{
     MlDsa44, MlDsa65, MlDsa87, MlDsaParams, MlDsaSignature, MlDsaSigner, MlDsaVerifier,
 };
