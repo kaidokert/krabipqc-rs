@@ -3,6 +3,8 @@
 //! the matrix shape, eta, gamma1/gamma2, tau, omega, and derived
 //! encoding byte lengths.
 
+use subtle::{Choice, ConditionallySelectable};
+
 /// Modulus q = 2^23 - 2^13 + 1.
 pub const Q: u32 = 8_380_417;
 
@@ -29,23 +31,22 @@ pub const D: u32 = 13;
 /// `|x| < 2*q`; all in-tree callers pass `|x| < q`.
 #[inline]
 pub fn from_signed(x: i32, q: u32) -> u32 {
-    let neg_mask = (x >> 31) as u32;
+    // Arithmetic right shift fills with the sign bit; & 1 isolates it.
+    let is_neg = Choice::from(((x >> 31) as u32 & 1) as u8);
     let abs = x.wrapping_abs() as u32;
-    let geq_q = (((abs.wrapping_sub(q) >> 31) ^ 1) & 1).wrapping_neg();
-    let abs_red = abs.wrapping_sub(q & geq_q);
-    let pos = abs_red;
-    let zero_mask = ((abs_red | abs_red.wrapping_neg()) >> 31).wrapping_sub(1);
-    let neg = q.wrapping_sub(abs_red) & !zero_mask;
-    (pos & !neg_mask) | (neg & neg_mask)
+    let geq_q = Choice::from((((abs.wrapping_sub(q)) >> 31) ^ 1) as u8 & 1);
+    let abs_red = u32::conditional_select(&abs, &abs.wrapping_sub(q), geq_q);
+    // x | wrapping_neg(x) has the high bit set for any nonzero x.
+    let is_zero = Choice::from((((abs_red | abs_red.wrapping_neg()) >> 31) ^ 1) as u8);
+    let neg_val = u32::conditional_select(&q.wrapping_sub(abs_red), &0u32, is_zero);
+    u32::conditional_select(&abs_red, &neg_val, is_neg)
 }
 
 /// Canonical `[0, q)` → centered `(-q/2, q/2]`.
 #[inline]
 pub fn to_signed(x: u32, q: u32) -> i32 {
-    let in_high = ((q / 2).wrapping_sub(x) >> 31) & 1;
-    let mask = 0u32.wrapping_sub(in_high);
-    let x_minus_q = x.wrapping_sub(q);
-    ((x & !mask) | (x_minus_q & mask)) as i32
+    let in_high = Choice::from((((q / 2).wrapping_sub(x) >> 31) & 1) as u8);
+    u32::conditional_select(&x, &x.wrapping_sub(q), in_high) as i32
 }
 
 /// Absolute value of the centered representative: `min(x, q - x)` for
@@ -53,9 +54,8 @@ pub fn to_signed(x: u32, q: u32) -> i32 {
 #[inline]
 pub fn abs_centered(x: u32, q: u32) -> u32 {
     let q_minus_x = q.wrapping_sub(x);
-    let take_q_minus_x = (q_minus_x.wrapping_sub(x) >> 31) & 1;
-    let mask = 0u32.wrapping_sub(take_q_minus_x);
-    (x & !mask) | (q_minus_x & mask)
+    let take_q_minus_x = Choice::from(((q_minus_x.wrapping_sub(x) >> 31) & 1) as u8);
+    u32::conditional_select(&x, &q_minus_x, take_q_minus_x)
 }
 
 /// FIPS 204 `eta`. Closed enum so an unsupported value can't reach

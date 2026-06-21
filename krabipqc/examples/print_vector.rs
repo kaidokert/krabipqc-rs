@@ -5,7 +5,10 @@
 //!
 //! Run with: `cargo run --release --example print_vector`.
 
-use krabipqc::{ml_dsa_44, ml_dsa_65, ml_dsa_87, ml_kem_512, ml_kem_768, ml_kem_1024};
+use krabipqc::{
+    KeyGenSeed, SigningRandomness, ml_dsa_44, ml_dsa_65, ml_dsa_87, ml_kem_512, ml_kem_768,
+    ml_kem_1024,
+};
 
 fn main() {
     // FIPS 204 M' for pure ML-DSA, ctx = "":
@@ -13,8 +16,8 @@ fn main() {
     let mut mp = vec![0u8, 0u8];
     mp.extend_from_slice(MESSAGE);
 
-    let (pk, sk) = ml_dsa_44::keygen_from_seed(&XI).unwrap();
-    let sig = ml_dsa_44::sign_msg_repr(&sk, &mp, &RND).unwrap();
+    let (pk, sk) = ml_dsa_44::keygen_from_seed(&KeyGenSeed(XI)).unwrap();
+    let sig = ml_dsa_44::sign_msg_repr(&sk, &mp, &SigningRandomness(RND)).unwrap();
     assert!(ml_dsa_44::verify_msg_repr(&pk, &mp, &sig));
 
     println!("// xi (keygen seed):");
@@ -61,8 +64,8 @@ fn main() {
     print_arr("KEM_SS", &ss_encaps);
 
     // ML-DSA-65 deterministic vector.
-    let (pk_65, sk_65) = ml_dsa_65::keygen_from_seed(&XI).unwrap();
-    let sig_65 = ml_dsa_65::sign_msg_repr(&sk_65, &mp, &RND).unwrap();
+    let (pk_65, sk_65) = ml_dsa_65::keygen_from_seed(&KeyGenSeed(XI)).unwrap();
+    let sig_65 = ml_dsa_65::sign_msg_repr(&sk_65, &mp, &SigningRandomness(RND)).unwrap();
     assert!(ml_dsa_65::verify_msg_repr(&pk_65, &mp, &sig_65));
     println!("// ML-DSA-65 pk:");
     print_arr("PK_65", &pk_65);
@@ -72,8 +75,8 @@ fn main() {
     print_arr("SIG_65", &sig_65);
 
     // ML-DSA-87 deterministic vector.
-    let (pk_87, sk_87) = ml_dsa_87::keygen_from_seed(&XI).unwrap();
-    let sig_87 = ml_dsa_87::sign_msg_repr(&sk_87, &mp, &RND).unwrap();
+    let (pk_87, sk_87) = ml_dsa_87::keygen_from_seed(&KeyGenSeed(XI)).unwrap();
+    let sig_87 = ml_dsa_87::sign_msg_repr(&sk_87, &mp, &SigningRandomness(RND)).unwrap();
     assert!(ml_dsa_87::verify_msg_repr(&pk_87, &mp, &sig_87));
     println!("// ML-DSA-87 pk:");
     print_arr("PK_87", &pk_87);

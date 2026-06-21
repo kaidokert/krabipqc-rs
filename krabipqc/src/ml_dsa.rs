@@ -14,27 +14,26 @@ macro_rules! per_set {
         pub mod $mod {
             use fixed_bigint::{Ct, Nct};
 
-            use core::convert::Infallible;
-
             use crate::internal;
             use crate::params::$params;
-            use crate::{EncodeError, RandError, SignError};
-
-            pub use crate::PreHash;
+            use crate::{
+                DomainSeparator, EncodeError, KeyGenSeed, MessageError, PreHash, RandError,
+                SignError, SigningRandomness,
+            };
 
             pub const PK_BYTES: usize = $params.pk_bytes;
             pub const SK_BYTES: usize = $params.sk_bytes;
             pub const SIG_BYTES: usize = $params.sig_bytes;
 
             /// Deterministic ML-DSA KeyGen (FIPS 204 §6 Alg 1). Takes
-            /// the raw 32-byte seed `ξ`; returns `(pk, sk)`.
+            /// the 32-byte seed `ξ` as a [`KeyGenSeed`]; returns `(pk, sk)`.
             /// Use [`keygen`] when the seed should come from an RNG.
             pub fn keygen_from_seed(
-                xi: &[u8; 32],
+                xi: &KeyGenSeed,
             ) -> Result<([u8; PK_BYTES], [u8; SK_BYTES]), EncodeError> {
                 let mut pk = [0u8; PK_BYTES];
                 let mut sk = [0u8; SK_BYTES];
-                internal::keygen_internal_impl::<_, _, Ct>(&$params, xi, &mut pk, &mut sk)?;
+                internal::keygen_internal_impl::<_, _, Ct>(&$params, &xi.0, &mut pk, &mut sk)?;
                 Ok((pk, sk))
             }
 
@@ -48,10 +47,10 @@ macro_rules! per_set {
             pub fn sign_msg_repr(
                 sk: &[u8; SK_BYTES],
                 m_prime: &[u8],
-                rnd: &[u8; 32],
+                rnd: &SigningRandomness,
             ) -> Result<[u8; SIG_BYTES], EncodeError> {
                 let mut sig = [0u8; SIG_BYTES];
-                internal::sign_internal_impl::<_, _, Ct>(&$params, sk, m_prime, rnd, &mut sig)?;
+                internal::sign_internal_impl::<_, _, Ct>(&$params, sk, m_prime, &rnd.0, &mut sig)?;
                 Ok(sig)
             }
 
@@ -71,87 +70,64 @@ macro_rules! per_set {
             }
 
             /// Pure ML-DSA Sign (FIPS 204 §5.2). Builds the message
-            /// representative `M' = 0x00 || |ctx| || ctx || M` from
-            /// the four input pieces, absorbing them directly into
-            /// SHAKE-256 without a contiguous `M'` buffer. Returns
-            /// `CtxTooLong` if `ctx.len() > 255`; the `Encode` arm is
-            /// structurally unreachable for in-tree const-sized inputs
-            /// but surfaced rather than panicked.
+            /// representative `M' = 0x00 || |ctx| || ctx || M`, absorbing
+            /// the pieces directly into SHAKE-256. Returns
+            /// `CtxTooLong` if `ctx.len() > u8::MAX as usize`.
             pub fn sign(
                 sk: &[u8; SK_BYTES],
                 m: &[u8],
                 ctx: &[u8],
-                rnd: &[u8; 32],
-            ) -> Result<[u8; SIG_BYTES], SignError<Infallible>> {
-                if ctx.len() > 255 {
-                    return Err(SignError::CtxTooLong);
-                }
-                let prefix = [0x00u8];
-                let ctx_len = [ctx.len() as u8];
-                let pieces: &[&[u8]] = &[&prefix, &ctx_len, ctx, m];
+                rnd: &SigningRandomness,
+            ) -> Result<[u8; SIG_BYTES], MessageError> {
+                let ds = DomainSeparator::pure(ctx).ok_or(MessageError::CtxTooLong)?;
+                let (pieces, n) = ds.pieces(m);
                 let mut sig = [0u8; SIG_BYTES];
                 internal::sign_internal_impl_pieces::<_, _, Ct>(
-                    &$params, sk, pieces, rnd, &mut sig,
+                    &$params,
+                    sk,
+                    &pieces[..n],
+                    &rnd.0,
+                    &mut sig,
                 )?;
                 Ok(sig)
             }
 
             /// Pure ML-DSA Verify (FIPS 204 §5.2). Builds the message
-            /// representative `M' = 0x00 || |ctx| || ctx || M` from
-            /// the four input pieces, absorbing them directly into
-            /// SHAKE-256 without materializing a contiguous `M'`
-            /// buffer. Returns `false` on any failure (oversize `ctx`,
-            /// malformed `sig`, or hash mismatch).
+            /// representative `M' = 0x00 || |ctx| || ctx || M`, absorbing
+            /// the pieces directly into SHAKE-256 without materializing a
+            /// contiguous `M'` buffer. Returns `false` on any failure.
             pub fn verify(
                 pk: &[u8; PK_BYTES],
                 m: &[u8],
                 ctx: &[u8],
                 sig: &[u8; SIG_BYTES],
             ) -> bool {
-                if ctx.len() > 255 {
+                let Some(ds) = DomainSeparator::pure(ctx) else {
                     return false;
-                }
-                let prefix = [0x00u8];
-                let ctx_len = [ctx.len() as u8];
-                let pieces: &[&[u8]] = &[&prefix, &ctx_len, ctx, m];
-                internal::verify_internal_impl_pieces::<_, _, Nct>(&$params, pk, pieces, sig)
+                };
+                let (pieces, n) = ds.pieces(m);
+                internal::verify_internal_impl_pieces::<_, _, Nct>(&$params, pk, &pieces[..n], sig)
             }
 
-            // FIPS 204 §5.4 Table 3, DER-encoded.
-            const OID_SHA256: [u8; 11] = [
-                0x06, 0x09, 0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x02, 0x01,
-            ];
-            const OID_SHA512: [u8; 11] = [
-                0x06, 0x09, 0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x02, 0x03,
-            ];
-
-            #[inline]
-            fn ph_pieces(ph: &PreHash) -> (&'static [u8], &[u8]) {
-                match ph {
-                    PreHash::Sha256(d) => (&OID_SHA256, d.as_slice()),
-                    PreHash::Sha512(d) => (&OID_SHA512, d.as_slice()),
-                }
-            }
-
-            /// HashML-DSA Sign (FIPS 204 §5.4). Caller hashes the
-            /// message externally and passes the digest via [`PreHash`].
-            /// Returns `CtxTooLong` if `ctx.len() > 255`.
+            /// HashML-DSA Sign (FIPS 204 §5.4). Caller hashes the message
+            /// externally and passes the digest via [`PreHash`].
+            /// Returns `CtxTooLong` if `ctx.len() > u8::MAX as usize`.
             pub fn hash_sign(
                 sk: &[u8; SK_BYTES],
-                ph: &PreHash,
+                ph: PreHash<'_>,
                 ctx: &[u8],
-                rnd: &[u8; 32],
-            ) -> Result<[u8; SIG_BYTES], SignError<Infallible>> {
-                if ctx.len() > 255 {
-                    return Err(SignError::CtxTooLong);
-                }
-                let prefix = [0x01u8];
-                let ctx_len = [ctx.len() as u8];
-                let (oid, digest) = ph_pieces(ph);
-                let pieces: &[&[u8]] = &[&prefix, &ctx_len, ctx, oid, digest];
+                rnd: &SigningRandomness,
+            ) -> Result<[u8; SIG_BYTES], MessageError> {
+                let ds = DomainSeparator::pre_hashed(ctx, ph.oid(), ph.digest())
+                    .ok_or(MessageError::CtxTooLong)?;
+                let (pieces, n) = ds.pieces(&[]);
                 let mut sig = [0u8; SIG_BYTES];
                 internal::sign_internal_impl_pieces::<_, _, Ct>(
-                    &$params, sk, pieces, rnd, &mut sig,
+                    &$params,
+                    sk,
+                    &pieces[..n],
+                    &rnd.0,
+                    &mut sig,
                 )?;
                 Ok(sig)
             }
@@ -161,37 +137,30 @@ macro_rules! per_set {
             /// Used by TLS 1.3 + ML-DSA CertificateVerify.
             pub fn hash_verify(
                 pk: &[u8; PK_BYTES],
-                ph: &PreHash,
+                ph: PreHash<'_>,
                 ctx: &[u8],
                 sig: &[u8; SIG_BYTES],
             ) -> bool {
-                if ctx.len() > 255 {
+                let Some(ds) = DomainSeparator::pre_hashed(ctx, ph.oid(), ph.digest()) else {
                     return false;
-                }
-                let prefix = [0x01u8];
-                let ctx_len = [ctx.len() as u8];
-                let (oid, digest) = ph_pieces(ph);
-                let pieces: &[&[u8]] = &[&prefix, &ctx_len, ctx, oid, digest];
-                internal::verify_internal_impl_pieces::<_, _, Nct>(&$params, pk, pieces, sig)
+                };
+                let (pieces, n) = ds.pieces(&[]);
+                internal::verify_internal_impl_pieces::<_, _, Nct>(&$params, pk, &pieces[..n], sig)
             }
 
-            // RNG-driven entry points. `try_fill_bytes` lets HW RNGs
-            // that can fail propagate their error type rather than
-            // panic.
-
-            /// RNG-driven ML-DSA KeyGen. Draws the 32-byte seed `xi`
+            /// RNG-driven ML-DSA KeyGen. Draws the 32-byte seed `ξ`
             /// from `rng`; returns `(pk, sk)`.
             pub fn keygen<R: rand_core::TryCryptoRng + ?Sized>(
                 rng: &mut R,
             ) -> Result<([u8; PK_BYTES], [u8; SK_BYTES]), RandError<R::Error>> {
-                let mut xi = zeroize::Zeroizing::new([0u8; 32]);
-                rng.try_fill_bytes(&mut *xi).map_err(RandError::Rng)?;
+                let mut xi = zeroize::Zeroizing::new(KeyGenSeed([0u8; 32]));
+                rng.try_fill_bytes(&mut xi.0).map_err(RandError::Rng)?;
                 Ok(keygen_from_seed(&xi)?)
             }
 
             /// RNG-driven pure ML-DSA Sign. Draws the 32-byte `rnd`
             /// from `rng` and builds the FIPS 204 §5.2 `M'` from
-            /// `(m, ctx)`. Returns `CtxTooLong` if `ctx.len() > 255`
+            /// `(m, ctx)`. Returns `Message(CtxTooLong)` if `ctx.len() > u8::MAX as usize`
             /// and `Rng(R::Error)` on RNG failure.
             pub fn sign_random<R: rand_core::TryCryptoRng + ?Sized>(
                 sk: &[u8; SK_BYTES],
@@ -199,43 +168,33 @@ macro_rules! per_set {
                 ctx: &[u8],
                 rng: &mut R,
             ) -> Result<[u8; SIG_BYTES], SignError<R::Error>> {
-                if ctx.len() > 255 {
-                    return Err(SignError::CtxTooLong);
+                if ctx.len() > u8::MAX as usize {
+                    return Err(SignError::Message(MessageError::CtxTooLong));
                 }
-                let mut rnd = zeroize::Zeroizing::new([0u8; 32]);
-                rng.try_fill_bytes(&mut *rnd).map_err(SignError::Rng)?;
-                sign(sk, m, ctx, &rnd).map_err(lift_sign_err)
+                let mut rnd = zeroize::Zeroizing::new(SigningRandomness([0u8; 32]));
+                rng.try_fill_bytes(&mut rnd.0).map_err(SignError::Rng)?;
+                sign(sk, m, ctx, &rnd).map_err(SignError::Message)
             }
 
             /// RNG-driven HashML-DSA Sign.
             pub fn hash_sign_random<R: rand_core::TryCryptoRng + ?Sized>(
                 sk: &[u8; SK_BYTES],
-                ph: &PreHash,
+                ph: PreHash<'_>,
                 ctx: &[u8],
                 rng: &mut R,
             ) -> Result<[u8; SIG_BYTES], SignError<R::Error>> {
-                if ctx.len() > 255 {
-                    return Err(SignError::CtxTooLong);
+                if ctx.len() > u8::MAX as usize {
+                    return Err(SignError::Message(MessageError::CtxTooLong));
                 }
-                let mut rnd = zeroize::Zeroizing::new([0u8; 32]);
-                rng.try_fill_bytes(&mut *rnd).map_err(SignError::Rng)?;
-                hash_sign(sk, ph, ctx, &rnd).map_err(lift_sign_err)
-            }
-
-            /// The `Rng` arm wraps the uninhabited `Infallible`, so the `match never {}` is
-            /// provably dead.
-            fn lift_sign_err<E>(e: SignError<Infallible>) -> SignError<E> {
-                match e {
-                    SignError::CtxTooLong => SignError::CtxTooLong,
-                    SignError::Encode(x) => SignError::Encode(x),
-                    SignError::Rng(never) => match never {},
-                }
+                let mut rnd = zeroize::Zeroizing::new(SigningRandomness([0u8; 32]));
+                rng.try_fill_bytes(&mut rnd.0).map_err(SignError::Rng)?;
+                hash_sign(sk, ph, ctx, &rnd).map_err(SignError::Message)
             }
 
             #[cfg(test)]
             mod tests {
                 use super::*;
-                use crate::PreHash;
+                use crate::{KeyGenSeed, MessageError, PreHash, SignError, SigningRandomness};
                 use core::convert::Infallible;
 
                 struct FixedRng(u8);
@@ -261,60 +220,60 @@ macro_rules! per_set {
 
                 #[test]
                 fn hash_sign_verify_sha256() {
-                    let (pk, sk) = keygen_from_seed(&[0x42u8; 32]).unwrap();
-                    let ph = PreHash::Sha256([0x11u8; 32]);
-                    let sig = hash_sign(&sk, &ph, b"ctx", &[0xC3u8; 32]).unwrap();
-                    assert!(hash_verify(&pk, &ph, b"ctx", &sig));
-                    let ph_wrong = PreHash::Sha256([0x22u8; 32]);
-                    assert!(!hash_verify(&pk, &ph_wrong, b"ctx", &sig));
+                    let (pk, sk) = keygen_from_seed(&KeyGenSeed([0x42u8; 32])).unwrap();
+                    let ph = PreHash::sha256(&[0x11u8; 32]);
+                    let sig = hash_sign(&sk, ph, b"ctx", &SigningRandomness([0xC3u8; 32])).unwrap();
+                    assert!(hash_verify(&pk, ph, b"ctx", &sig));
+                    let ph_wrong = PreHash::sha256(&[0x22u8; 32]);
+                    assert!(!hash_verify(&pk, ph_wrong, b"ctx", &sig));
                 }
 
                 #[test]
                 fn hash_sign_verify_sha512() {
-                    let (pk, sk) = keygen_from_seed(&[0x55u8; 32]).unwrap();
-                    let ph = PreHash::Sha512([0x77u8; 64]);
-                    let sig = hash_sign(&sk, &ph, b"", &[0xC3u8; 32]).unwrap();
-                    assert!(hash_verify(&pk, &ph, b"", &sig));
+                    let (pk, sk) = keygen_from_seed(&KeyGenSeed([0x55u8; 32])).unwrap();
+                    let ph = PreHash::sha512(&[0x77u8; 64]);
+                    let sig = hash_sign(&sk, ph, b"", &SigningRandomness([0xC3u8; 32])).unwrap();
+                    assert!(hash_verify(&pk, ph, b"", &sig));
                 }
 
                 #[test]
                 fn sign_random_roundtrip() {
-                    let (pk, sk) = keygen_from_seed(&[0x42u8; 32]).unwrap();
+                    let (pk, sk) = keygen_from_seed(&KeyGenSeed([0x42u8; 32])).unwrap();
                     let sig = sign_random(&sk, b"msg", b"", &mut FixedRng(0x77)).unwrap();
                     assert!(verify(&pk, b"msg", b"", &sig));
                 }
 
                 #[test]
                 fn hash_sign_random_roundtrip() {
-                    let (pk, sk) = keygen_from_seed(&[0x42u8; 32]).unwrap();
-                    let ph = PreHash::Sha256([0xABu8; 32]);
-                    let sig = hash_sign_random(&sk, &ph, b"", &mut FixedRng(0x77)).unwrap();
-                    assert!(hash_verify(&pk, &ph, b"", &sig));
+                    let (pk, sk) = keygen_from_seed(&KeyGenSeed([0x42u8; 32])).unwrap();
+                    let ph = PreHash::sha256(&[0xABu8; 32]);
+                    let sig = hash_sign_random(&sk, ph, b"", &mut FixedRng(0x77)).unwrap();
+                    assert!(hash_verify(&pk, ph, b"", &sig));
                 }
 
                 #[test]
                 fn ctx_too_long_rejected() {
-                    let (pk, sk) = keygen_from_seed(&[0x42u8; 32]).unwrap();
+                    let (pk, sk) = keygen_from_seed(&KeyGenSeed([0x42u8; 32])).unwrap();
                     let long = [0u8; 256];
-                    let ph = PreHash::Sha256([0u8; 32]);
-                    let rnd = [0u8; 32];
+                    let ph = PreHash::sha256(&[0u8; 32]);
+                    let rnd = SigningRandomness([0u8; 32]);
                     assert!(matches!(
                         sign(&sk, b"m", &long, &rnd),
-                        Err(SignError::CtxTooLong)
+                        Err(MessageError::CtxTooLong)
                     ));
                     assert!(!verify(&pk, b"m", &long, &[0u8; SIG_BYTES]));
                     assert!(matches!(
-                        hash_sign(&sk, &ph, &long, &rnd),
-                        Err(SignError::CtxTooLong)
+                        hash_sign(&sk, ph, &long, &rnd),
+                        Err(MessageError::CtxTooLong)
                     ));
-                    assert!(!hash_verify(&pk, &ph, &long, &[0u8; SIG_BYTES]));
+                    assert!(!hash_verify(&pk, ph, &long, &[0u8; SIG_BYTES]));
                     assert!(matches!(
                         sign_random(&sk, b"m", &long, &mut FixedRng(0x42)),
-                        Err(SignError::CtxTooLong)
+                        Err(SignError::Message(MessageError::CtxTooLong))
                     ));
                     assert!(matches!(
-                        hash_sign_random(&sk, &ph, &long, &mut FixedRng(0x42)),
-                        Err(SignError::CtxTooLong)
+                        hash_sign_random(&sk, ph, &long, &mut FixedRng(0x42)),
+                        Err(SignError::Message(MessageError::CtxTooLong))
                     ));
                 }
             }

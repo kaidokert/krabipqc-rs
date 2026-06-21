@@ -42,11 +42,14 @@ zeroize = { version = "1", default-features = false }
 
 rand_core = { version = "0.10", default-features = false }
 
+# DER-encoded OIDs for the FIPS 204 §5.4 HashML-DSA pre-hash selectors.
+const-oid = { version = "0.10", default-features = false, features = ["db"] }
+
 # RustCrypto trait crates (kem::Kem / signature::{Signer, Verifier, ...}).
 # Unconditional: interop with the broader RustCrypto ecosystem is the
 # default expectation for a public-release PQC crate. Adds ~252 bytes
 # of .text on cortex-m3 after DCE.
-kem = "0.3"
+kem = { version = "0.3", default-features = false }
 signature = { version = "3", default-features = false, features = ["rand_core"] }
 # Direct dep with `zeroize` feature so the `Array<u8, N>` storage in
 # the trait wrappers gets `Zeroize` — kem's `crypto-common` alias

@@ -329,6 +329,8 @@ where
         }
         if !(z_norm < params.gamma1 - params.beta && r0_norm < params.gamma2.value() - params.beta)
         {
+            // wrapping_add: u16::MAX / L ≈ 9000–16000 retries needed to wrap;
+            // rejection probability per attempt is ~1/2^128, so overflow is not reachable.
             kappa = kappa.wrapping_add(L as u16);
             continue;
         }
@@ -382,7 +384,7 @@ where
             && (weight as usize) <= params.omega
             && !hint_overflow)
         {
-            kappa = kappa.wrapping_add(L as u16);
+            kappa = kappa.wrapping_add(L as u16); // same bound as above
             continue;
         }
 
