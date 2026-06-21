@@ -177,7 +177,7 @@ macro_rules! per_set {
 
             // RNG-driven entry points. `try_fill_bytes` lets HW RNGs
             // that can fail propagate their error type rather than
-            // panic; the bound is `TryCryptoRng` for that reason.
+            // panic.
 
             /// RNG-driven ML-DSA KeyGen. Draws the 32-byte seed `xi`
             /// from `rng`; returns `(pk, sk)`.
@@ -222,11 +222,8 @@ macro_rules! per_set {
                 hash_sign(sk, ph, ctx, &rnd).map_err(lift_sign_err)
             }
 
-            /// Reshape a non-RNG `SignError<Infallible>` from `sign` /
-            /// `hash_sign` into the `SignError<R::Error>` that the
-            /// RNG-driven entry points return. The `Rng` arm wraps the
-            /// uninhabited `Infallible`, so the `match never {}` is
-            /// provably dead code.
+            /// The `Rng` arm wraps the uninhabited `Infallible`, so the `match never {}` is
+            /// provably dead.
             fn lift_sign_err<E>(e: SignError<Infallible>) -> SignError<E> {
                 match e {
                     SignError::CtxTooLong => SignError::CtxTooLong,

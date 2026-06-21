@@ -207,7 +207,6 @@ fn ct_coeff_from_half_byte(b: u8, eta: Eta) -> (u32, u32) {
             (accept, TBL[b as usize])
         }
         Eta::Eta4 => {
-            // accept iff b in 0..=8.
             const TBL: [u32; 16] = [
                 4,
                 3,
@@ -287,7 +286,6 @@ pub fn expand_mask<const L: usize>(
     gamma1_bits: usize,
 ) -> Result<PolyVec<u32, L>, EncodeError> {
     let mut out = PolyVec::<u32, L>::zero();
-    // c = 1 + bitlen(gamma1 - 1); for gamma1 = 2^17, c = 18.
     let c_bits = 1 + gamma1_bits;
     let bytes_per_poly = N * c_bits / 8;
     // gamma1 = 2^19 → 640 bytes per poly; 1024 covers it with slack.

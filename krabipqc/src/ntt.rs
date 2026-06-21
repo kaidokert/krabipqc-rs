@@ -12,8 +12,6 @@ use crate::params::ZETA;
 use crate::params::{N, Q, Q_N_PRIME, Q_R2_MOD_Q};
 use crate::poly::Poly;
 
-// ML-DSA-pinned shims so the NTT bodies don't restate the modulus
-// constants on every call.
 #[inline]
 fn reduce<P: FieldExt<P> + Personality>(x: u32) -> u32 {
     <P as FieldExt<P>>::reduce(x, Q, Q_N_PRIME, Q_R2_MOD_Q)
@@ -282,10 +280,6 @@ mod tests {
 
     #[test]
     fn ntt_nct_ct_identical_output() {
-        // The Ct path must produce identical Mont-form bytes to the Nct
-        // path. Same canonical input → same NTT output via both
-        // personalities.
-
         let mut a_nct = Poly::<u32>::zero();
         let mut state: u64 = 0xabcd_0123_4567_89ef;
         for i in 0..N {

@@ -9,8 +9,7 @@ use modmath::basic::montgomery::wide;
 use modmath::basic::pre_reduced as pr;
 
 /// Montgomery-domain ops on raw `u32` reps, dispatched by `P`.
-/// Inputs and outputs are u32 in `[0, q)` interpreted as `x · R mod q`;
-/// the modulus constants (`q`, `n_prime = -q^-1 mod 2^32`,
+/// The modulus constants (`q`, `n_prime = -q^-1 mod 2^32`,
 /// `r2_mod_q = R^2 mod q`) are threaded per-call so a single set of
 /// impls serves any prime.
 pub trait FieldExt<P: Personality> {
@@ -23,9 +22,8 @@ pub trait FieldExt<P: Personality> {
     /// Mont-domain multiplication: `(a·R)(b·R)/R = (a·b)·R`.
     fn mul_mont(a: u32, b: u32, q: u32, n_prime: u32) -> u32;
 
-    /// Wide multiply-accumulate: `(acc_lo, acc_hi) += a · b`. Caller
-    /// pairs `N` of these with a single [`Self::redc`] at the end to
-    /// get a fused inner product paying one REDC per output coefficient
+    /// Caller pairs `N` of these with a single [`Self::redc`] at the end
+    /// to get a fused inner product paying one REDC per output coefficient
     /// instead of one per multiply. Safe while `N ≤ R/Q` (R = 2^32).
     fn mul_acc(acc_lo: u32, acc_hi: u32, a: u32, b: u32) -> (u32, u32);
 

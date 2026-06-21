@@ -14,9 +14,8 @@ Prototype `no_std` ML-DSA and ML-KEM for microcontrollers.
 
 ## Footprint
 
-Measured under QEMU from the last CI run. `.text` is the linked example binary
-size; stack is the peak high-water mark. Larger parameter sets scale up
-proportionally.
+Measured under QEMU. `.text` is the linked example binary size; stack is the peak high-water mark. Larger
+parameter sets scale up proportionally.
 
 | Operation                    | Cortex-M3 .text | Cortex-M3 stack | RISC-V .text | RISC-V stack |
 |------------------------------|----------------:|----------------:|-------------:|-------------:|

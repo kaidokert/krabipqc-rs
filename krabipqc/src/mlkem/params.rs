@@ -68,16 +68,15 @@ pub struct Params<const K: usize> {
     pub eta2: Eta,
     pub du: usize,
     pub dv: usize,
-    pub ek_bytes: usize, // public key (encapsulation key)
-    pub dk_bytes: usize, // private key (decapsulation key)
-    pub ct_bytes: usize, // ciphertext
+    pub ek_bytes: usize,
+    pub dk_bytes: usize,
+    pub ct_bytes: usize,
 }
 
 /// Shared-secret length (always 32 bytes).
 pub const SS_BYTES: usize = 32;
 
 const fn ek_bytes(k: usize) -> usize {
-    // 32 (rho) + 384 bytes per encoded polynomial (12 bits * 256 / 8)
     32 + 384 * k
 }
 const fn dk_bytes(k: usize) -> usize {

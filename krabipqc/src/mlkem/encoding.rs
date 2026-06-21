@@ -170,7 +170,6 @@ mod tests {
 
     #[test]
     fn byte_encode_decode_roundtrip_d12() {
-        // d = 12 is full-precision: no information loss.
         let mut p = Poly::<u32>::zero();
         for i in 0..N {
             p.coeffs[i] = (i as u32 * 13 + 7) % Q_VAL;
@@ -196,7 +195,6 @@ mod tests {
 
     #[test]
     fn compress_then_byte_encode_roundtrip() {
-        // compress -> encode -> decode -> decompress should recover within bound.
         let mut p = Poly::<u32>::zero();
         for i in 0..N {
             p.coeffs[i] = (i as u32 * 19 + 3) % Q_VAL;

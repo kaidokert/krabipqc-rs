@@ -88,8 +88,6 @@ impl Poly<u32> {
                 if k < N {
                     out.coeffs[k] = pr::add::<u32>(out.coeffs[k], prod, modulus);
                 } else {
-                    // X^N = -1: contribution lands at index (k - N) with
-                    // a sign flip.
                     out.coeffs[k - N] = pr::sub::<u32>(out.coeffs[k - N], prod, modulus);
                 }
             }
@@ -100,8 +98,7 @@ impl Poly<u32> {
     /// Coefficient-wise (Hadamard) multiplication modulo `modulus`.
     #[cfg(test)]
     ///
-    /// Not the right operation for NTT-domain polynomials (which need
-    /// the scheme-specific `mul_ntt` arriving with PR2); kept here for
+    /// Not the right operation for NTT-domain polynomials; kept here for
     /// the time-domain pointwise multiply that some helpers want.
     pub fn elementwise_mul(&self, other: &Self, modulus: u32) -> Self {
         let mut out = Self::zero();
@@ -116,8 +113,7 @@ impl Poly<u32> {
 mod tests {
     use super::*;
 
-    // Small test prime. Real moduli (q = 3329 for ML-KEM, q ≈ 2^23 for
-    // ML-DSA) land with the per-scheme params in later PRs.
+    // Small test prime.
     const Q: u32 = 17;
 
     #[test]

@@ -67,7 +67,6 @@ where
         ntt::ntt::<P>(&mut e_hat.v[i]);
     }
 
-    // t_hat[i] = sum_j a_hat[i][j] * s_hat[j]  +  e_hat[i]
     let mut t_hat_raw = PolyVec::<u32, K>::zero();
     for i in 0..K {
         ntt::mul_ntt_acc::<K, P>(&mut t_hat_raw.v[i], &a_hat.rows[i].v, &s_hat.v);
@@ -122,7 +121,6 @@ where
     for i in 0..K {
         ntt::ntt::<P>(&mut y.v[i]);
     }
-    // y now holds y_hat.
 
     // Stream t_hat one column at a time to avoid materializing the full
     // K-poly PolyVec on the stack. Each t_hat[j] is decoded and immediately
@@ -142,8 +140,7 @@ where
             v_ntt.coeffs[k] = pr::add::<u32>(v_ntt.coeffs[k], prod.coeffs[k], Q);
         }
     }
-    // inv_NTT v_ntt in place — variable transitions from NTT-domain
-    // accumulator to time-domain v without a copy.
+    // in-place: avoids a copy.
     ntt::inv_ntt::<P>(&mut v_ntt);
     let mu: Zeroizing<Poly<u32>> = Zeroizing::new(decompress_poly(&byte_decode(m, 1)?, 1));
     for k in 0..N {
@@ -153,10 +150,9 @@ where
             Q,
         );
     }
-    let v_buf = v_ntt; // v_ntt now holds the time-domain v.
+    let v_buf = v_ntt;
 
-    // u rows streamed straight into ct_out:
-    //   u_row[i] = invNTT(sum_j A_hat[j][i] * y_hat[j]) + e1[i]
+    // u_row[i] = invNTT(sum_j A_hat[j][i] * y_hat[j]) + e1[i]
     let c1_len = 32 * params.du * K;
     let c2_len = 32 * params.dv;
     let u_chunk = 32 * params.du;
@@ -342,10 +338,9 @@ where
         }
     }
 
-    // Cancel the blinding factor before inv_ntt.
     blinding::scale_mont::<P>(&mut w_ntt, r_inv_mont, Q, Q_N_PRIME);
 
-    // w := v_prime - invNTT(w_ntt), reusing w_ntt in place.
+    // reusing w_ntt in place.
     ntt::inv_ntt::<P>(&mut w_ntt);
     let v_slice = ct.get(c1_len..).ok_or(EncodeError::BufferTooSmall)?;
     let v_prime = decompress_poly(&byte_decode(v_slice, params.dv)?, params.dv);
