@@ -1,13 +1,13 @@
 #![no_main]
 #![no_std]
 
-use krabipqc::ml_dsa_44;
+use krabipqc::{SigningRandomness, ml_dsa_44};
 use krabipqc_riscv32::test_fixture;
 use krabipqc_riscv32::test_vector::{MESSAGE, RND, SIG, SK};
 use riscv_rt::entry;
 
 fn sign() -> bool {
-    match ml_dsa_44::sign(&SK, MESSAGE, &[], &RND) {
+    match ml_dsa_44::sign(&SK, MESSAGE, &[], &SigningRandomness(RND)) {
         Ok(sig) => sig == SIG,
         Err(_) => false,
     }

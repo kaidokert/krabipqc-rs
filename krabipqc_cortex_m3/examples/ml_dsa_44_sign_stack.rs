@@ -6,12 +6,12 @@
 //! (would otherwise inflate the sign metric by the verify cost).
 
 use cortex_m_rt::entry;
-use krabipqc::ml_dsa_44;
+use krabipqc::{SigningRandomness, ml_dsa_44};
 use krabipqc_cortex_m3::test_fixture;
 use krabipqc_cortex_m3::test_vector::{MESSAGE, RND, SIG, SK};
 
 fn sign() -> bool {
-    match ml_dsa_44::sign(&SK, MESSAGE, &[], &RND) {
+    match ml_dsa_44::sign(&SK, MESSAGE, &[], &SigningRandomness(RND)) {
         Ok(sig) => sig == SIG,
         Err(_) => false,
     }
