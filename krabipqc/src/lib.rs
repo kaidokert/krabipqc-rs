@@ -1,30 +1,34 @@
 #![cfg_attr(not(test), no_std)]
 #![forbid(unsafe_code)]
 
-//! `no_std` ML-DSA (FIPS 204) keygen / sign / verify for all three
-//! parameter sets — [`ml_dsa_44`], [`ml_dsa_65`], [`ml_dsa_87`].
-//! Byte-for-byte ACVP-conformant on the `keyGen`, `sigGen`, and
-//! `sigVer` test vectors.
+//! `no_std` ML-DSA (FIPS 204) and ML-KEM (FIPS 203) for microcontrollers.
+//! Byte-for-byte ACVP-conformant on all six parameter sets.
 //!
 //! # Quick start
 //!
 //! ```ignore
-//! use krabipqc::ml_dsa_44;
+//! use krabipqc::{MlDsaSigner, MlDsaVerifier, MlDsa44};
+//! use kem::common::Generate;
+//! use signature::{Signer, Verifier};
 //!
-//! let xi = [0x42u8; 32];
-//! let (pk, sk) = ml_dsa_44::keygen_from_seed(&xi).unwrap();
+//! // Key generation (RNG-driven; fixed seed via ml_dsa_44::keygen_from_seed).
+//! let mut rng = /* your TryCryptoRng */;
+//! let signer: MlDsaSigner<MlDsa44> = MlDsaSigner::try_generate_from_rng(&mut rng).unwrap();
+//! let verifier: MlDsaVerifier<MlDsa44> = signer.verifying_key();
 //!
-//! let rnd = [0xC3u8; 32];
-//! let sig = ml_dsa_44::sign(&sk, b"hello mldsa", b"app-ctx", &rnd).unwrap();
-//!
-//! assert!(ml_dsa_44::verify(&pk, b"hello mldsa", b"app-ctx", &sig));
+//! let sig = signer.sign(b"hello mldsa");
+//! verifier.verify(b"hello mldsa", &sig).unwrap();
 //! ```
 //!
+//! Swap `MlDsa44` for [`MlDsa65`] or [`MlDsa87`] to change the parameter set;
+//! the rest of the code is identical.
+//!
+//! For ML-KEM use [`Dk<MlKem512>`][`Dk`] / [`Ek<MlKem512>`][`Ek`] via the
+//! [`kem`] trait family (`Generate`, `Encapsulate`, `TryDecapsulate`).
+//!
 //! For protocols that pre-hash the message (TLS 1.3 CertificateVerify
-//! per `draft-ietf-tls-mldsa`), use `hash_sign` / `hash_verify` with a
-//! [`PreHash`] selector. For low-level control over `M'`,
-//! `sign_msg_repr` / `verify_msg_repr` take the already-constructed
-//! `M'` as `&[u8]`.
+//! per `draft-ietf-tls-mldsa`), use `hash_sign` / `hash_verify` on the
+//! per-set facades ([`ml_dsa_44`] etc.) with a [`PreHash`] selector.
 //!
 //! RNG-driven entry points ([`ml_dsa_44::keygen`],
 //! [`ml_dsa_44::sign_random`], [`ml_dsa_44::hash_sign_random`]) take
