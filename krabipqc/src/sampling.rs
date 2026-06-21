@@ -359,6 +359,15 @@ mod tests {
     }
 
     #[test]
+    fn coeff_from_half_byte_eta4() {
+        assert_eq!(coeff_from_half_byte(0, Eta::Eta4), Some(4));
+        assert_eq!(coeff_from_half_byte(4, Eta::Eta4), Some(0));
+        assert_eq!(coeff_from_half_byte(8, Eta::Eta4), Some(-4));
+        assert_eq!(coeff_from_half_byte(9, Eta::Eta4), None);
+        assert_eq!(coeff_from_half_byte(15, Eta::Eta4), None);
+    }
+
+    #[test]
     fn rej_ntt_poly_smoke() {
         let rho = [0u8; 32];
         let p = rej_ntt_poly(&rho, 0, 0);

@@ -143,4 +143,16 @@ mod tests {
             }
         }
     }
+
+    #[test]
+    fn default_impls_yield_zero() {
+        let v: PolyVec<u32, 4> = PolyVec::default();
+        assert!(v.v.iter().all(|p| p.coeffs.iter().all(|&c| c == 0)));
+        let m: PolyMatrix<u32, 2, 3> = PolyMatrix::default();
+        assert!(
+            m.rows
+                .iter()
+                .all(|r| r.v.iter().all(|p| p.coeffs.iter().all(|&c| c == 0)))
+        );
+    }
 }

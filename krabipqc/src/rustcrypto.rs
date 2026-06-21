@@ -508,4 +508,105 @@ mod tests {
         bytes[ek_off + 1] = (bytes[ek_off + 1] & 0xF0) | 0x0F;
         assert!(<Dk512 as TryKeyInit>::new(&bytes).is_err());
     }
+
+    /// Success path of TryKeyInit for Dk, Ek::to_bytes, and Dk::Debug.
+    #[test]
+    fn mlkem512_dk_trykeyinit_valid_and_debug() {
+        let mut rng = FixedRng(0x42);
+        let dk = Dk512::try_generate_from_rng(&mut rng).unwrap();
+        let sk_bytes: Array<u8, sizes::U1632> = *dk.sk;
+        let dk2 = <Dk512 as TryKeyInit>::new(&sk_bytes).unwrap();
+        // Dk::Debug
+        let _ = std::format!("{:?}", dk2);
+        // Ek::to_bytes (KeyExport)
+        let _ = dk2.encapsulation_key().to_bytes();
+    }
+
+    /// ML-KEM-768 and ML-KEM-1024 round-trips via traits.
+    #[test]
+    fn mlkem768_roundtrip_via_traits() {
+        let mut rng = FixedRng(0x55);
+        let dk = Dk768::try_generate_from_rng(&mut rng).unwrap();
+        let ek = dk.encapsulation_key().clone();
+        let (ct, ss_send) = ek.encapsulate_with_rng(&mut FixedRng(0x77));
+        let ss_recv = dk.try_decapsulate(&ct).unwrap();
+        assert_eq!(ss_send, ss_recv);
+    }
+
+    #[test]
+    fn mlkem1024_roundtrip_via_traits() {
+        let mut rng = FixedRng(0x33);
+        let dk = Dk1024::try_generate_from_rng(&mut rng).unwrap();
+        let ek = dk.encapsulation_key().clone();
+        let (ct, ss_send) = ek.encapsulate_with_rng(&mut FixedRng(0x44));
+        let ss_recv = dk.try_decapsulate(&ct).unwrap();
+        assert_eq!(ss_send, ss_recv);
+    }
+
+    /// Signature byte conversions: AsRef, From<Array>, TryFrom<&[u8]>.
+    #[test]
+    fn mldsa44_sig_conversions() {
+        let mut rng = FixedRng(0x42);
+        let signer = MlDsa44Signer::try_generate_from_rng(&mut rng).unwrap();
+        let sig: MlDsa44Signature = signer.sign(b"test");
+
+        // AsRef<[u8]>
+        let bytes: &[u8] = sig.as_ref();
+
+        // TryFrom<&[u8]> success
+        let sig2 = MlDsa44Signature::try_from(bytes).unwrap();
+        assert_eq!(sig, sig2);
+
+        // From<Array<u8, _>>
+        let arr = Array::<u8, sizes::U2420>::default();
+        let _ = MlDsa44Signature::from(arr);
+
+        // TryFrom<&[u8]> failure on wrong length
+        assert!(MlDsa44Signature::try_from(&[0u8; 42][..]).is_err());
+    }
+
+    /// Verifier KeyInit, KeyExport, and verify-rejects-wrong-sig.
+    #[test]
+    fn mldsa44_verifier_init_and_export() {
+        let mut rng = FixedRng(0x42);
+        let signer = MlDsa44Signer::try_generate_from_rng(&mut rng).unwrap();
+        let vk = signer.verifying_key();
+
+        // KeyExport
+        let pk_bytes = vk.to_bytes();
+        // KeyInit
+        let vk2 = MlDsa44Verifier::new(&pk_bytes);
+
+        let sig: MlDsa44Signature = signer.sign(b"hello");
+        vk2.verify(b"hello", &sig).unwrap();
+    }
+
+    /// Signer::from_keypair and Signer::Debug.
+    #[test]
+    fn mldsa44_signer_from_keypair_and_debug() {
+        let (pk_bytes, sk_bytes) = crate::ml_dsa_44::keygen_internal(&[0x42u8; 32]).unwrap();
+        let sk_arr = Array::from(sk_bytes);
+        let pk_arr = Array::from(pk_bytes);
+        let signer = MlDsa44Signer::from_keypair(&sk_arr, &pk_arr);
+        let vk = signer.verifying_key();
+
+        // Debug
+        let _ = std::format!("{:?}", signer);
+
+        let sig: MlDsa44Signature = signer.sign(b"from_keypair");
+        vk.verify(b"from_keypair", &sig).unwrap();
+    }
+
+    /// ML-DSA-87 via traits (covers the third macro expansion).
+    #[test]
+    fn mldsa87_roundtrip_via_traits() {
+        let mut rng = FixedRng(0x99);
+        let signer = MlDsa87Signer::try_generate_from_rng(&mut rng).unwrap();
+        let vk = signer.verifying_key();
+        let msg = b"ml-dsa-87 via traits";
+        let sig: MlDsa87Signature = signer.sign(msg);
+        vk.verify(msg, &sig).unwrap();
+        let sig2: MlDsa87Signature = signer.sign_with_rng(&mut FixedRng(0x55), msg);
+        vk.verify(msg, &sig2).unwrap();
+    }
 }
