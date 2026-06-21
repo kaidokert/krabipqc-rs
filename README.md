@@ -3,6 +3,8 @@
 [![Rust](https://github.com/kaidokert/krabipqc-rs/actions/workflows/rust.yml/badge.svg)](https://github.com/kaidokert/krabipqc-rs/actions/workflows/rust.yml)
 [![Cortex-M](https://github.com/kaidokert/krabipqc-rs/actions/workflows/cortex_m.yml/badge.svg)](https://github.com/kaidokert/krabipqc-rs/actions/workflows/cortex_m.yml)
 [![Coverage Status](https://coveralls.io/repos/github/kaidokert/krabipqc-rs/badge.svg?branch=main)](https://coveralls.io/github/kaidokert/krabipqc-rs?branch=main)
+[![crates.io](https://img.shields.io/crates/v/krabipqc.svg)](https://crates.io/crates/krabipqc)
+[![docs.rs](https://docs.rs/krabipqc/badge.svg)](https://docs.rs/krabipqc)
 
 Prototype `no_std` ML-DSA and ML-KEM for microcontrollers.
 
