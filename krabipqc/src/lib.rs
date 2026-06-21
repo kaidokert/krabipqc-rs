@@ -110,9 +110,9 @@ pub(crate) enum DomainSeparator<'a> {
 }
 
 impl<'a> DomainSeparator<'a> {
-    /// Returns `None` if `ctx.len() > 255`.
+    /// Returns `None` if `ctx.len() > u8::MAX as usize`.
     pub fn pure(ctx: &'a [u8]) -> Option<Self> {
-        if ctx.len() > 255 {
+        if ctx.len() > u8::MAX as usize {
             return None;
         }
         Some(Self::Pure {
@@ -121,9 +121,9 @@ impl<'a> DomainSeparator<'a> {
         })
     }
 
-    /// Returns `None` if `ctx.len() > 255`.
+    /// Returns `None` if `ctx.len() > u8::MAX as usize`.
     pub fn pre_hashed(ctx: &'a [u8], oid: &'static [u8], digest: &'a [u8]) -> Option<Self> {
-        if ctx.len() > 255 {
+        if ctx.len() > u8::MAX as usize {
             return None;
         }
         Some(Self::PreHashed {

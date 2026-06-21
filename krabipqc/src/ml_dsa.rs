@@ -72,7 +72,7 @@ macro_rules! per_set {
             /// Pure ML-DSA Sign (FIPS 204 §5.2). Builds the message
             /// representative `M' = 0x00 || |ctx| || ctx || M`, absorbing
             /// the pieces directly into SHAKE-256. Returns
-            /// `CtxTooLong` if `ctx.len() > 255`.
+            /// `CtxTooLong` if `ctx.len() > u8::MAX as usize`.
             pub fn sign(
                 sk: &[u8; SK_BYTES],
                 m: &[u8],
@@ -111,7 +111,7 @@ macro_rules! per_set {
 
             /// HashML-DSA Sign (FIPS 204 §5.4). Caller hashes the message
             /// externally and passes the digest via [`PreHash`].
-            /// Returns `CtxTooLong` if `ctx.len() > 255`.
+            /// Returns `CtxTooLong` if `ctx.len() > u8::MAX as usize`.
             pub fn hash_sign(
                 sk: &[u8; SK_BYTES],
                 ph: PreHash<'_>,
@@ -160,7 +160,7 @@ macro_rules! per_set {
 
             /// RNG-driven pure ML-DSA Sign. Draws the 32-byte `rnd`
             /// from `rng` and builds the FIPS 204 §5.2 `M'` from
-            /// `(m, ctx)`. Returns `Message(CtxTooLong)` if `ctx.len() > 255`
+            /// `(m, ctx)`. Returns `Message(CtxTooLong)` if `ctx.len() > u8::MAX as usize`
             /// and `Rng(R::Error)` on RNG failure.
             pub fn sign_random<R: rand_core::TryCryptoRng + ?Sized>(
                 sk: &[u8; SK_BYTES],
@@ -168,7 +168,7 @@ macro_rules! per_set {
                 ctx: &[u8],
                 rng: &mut R,
             ) -> Result<[u8; SIG_BYTES], SignError<R::Error>> {
-                if ctx.len() > 255 {
+                if ctx.len() > u8::MAX as usize {
                     return Err(SignError::Message(MessageError::CtxTooLong));
                 }
                 let mut rnd = zeroize::Zeroizing::new(SigningRandomness([0u8; 32]));
@@ -183,7 +183,7 @@ macro_rules! per_set {
                 ctx: &[u8],
                 rng: &mut R,
             ) -> Result<[u8; SIG_BYTES], SignError<R::Error>> {
-                if ctx.len() > 255 {
+                if ctx.len() > u8::MAX as usize {
                     return Err(SignError::Message(MessageError::CtxTooLong));
                 }
                 let mut rnd = zeroize::Zeroizing::new(SigningRandomness([0u8; 32]));
