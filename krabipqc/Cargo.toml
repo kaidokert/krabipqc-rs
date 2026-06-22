@@ -30,12 +30,9 @@ modmath = { path = "/opt/m/rust/bigint/modmath-rs/modmath", version = "0.4.0", f
 # SHAKE-128 / SHAKE-256 / SHA3-256 / SHA3-512 wrappers in `hashing.rs`.
 sha3 = { version = "0.10", default-features = false }
 
-# `Personality` marker types (`Nct` / `Ct`) now live in const-num-traits.
-# fixed-bigint re-exports FixedUInt parameterised over them.
-fixed-bigint = { path = "/opt/m/rust/bigint/fixed-bigint-rs", version = "0.4.0", default-features = false, features = ["zeroize"] }
-
-# Ct / Nct / Personality used directly in krabipqc (no longer re-exported
-# through fixed-bigint in 0.4 — they now live in const-num-traits).
+# Ct / Nct / Personality — previously re-exported through fixed-bigint,
+# now live directly in const-num-traits in the 0.4 generation.
+# fixed-bigint itself has no remaining direct uses in krabipqc source.
 const-num-traits = { path = "/opt/m/rust/bigint/num-traits", version = "0.1.0", default-features = false }
 
 # Constant-time primitives for the Ct personality.
