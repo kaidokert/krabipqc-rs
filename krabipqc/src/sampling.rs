@@ -4,7 +4,7 @@
 //! drives) take a fixed-budget CT lookup path so the per-byte
 //! rejection timing doesn't leak `rho_prime`.
 
-use fixed_bigint::Nct;
+use const_num_traits::Nct;
 
 use crate::encoding::EncodeError;
 use crate::field_ext::FieldExt;

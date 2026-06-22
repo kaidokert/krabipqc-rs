@@ -6,7 +6,7 @@
 //! 128 invocations of `BaseCaseMultiply` (Alg 12), not the trivial
 //! elementwise product used by ML-DSA.
 
-use fixed_bigint::Personality;
+use const_num_traits::Personality;
 #[cfg(test)]
 use modmath::basic::pre_reduced as pr;
 
@@ -287,7 +287,7 @@ pub fn mul_ntt_acc<const K: usize, P: Personality + FieldExt<P>>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use fixed_bigint::{Ct, Nct};
+    use const_num_traits::{Ct, Nct};
 
     #[test]
     fn bitrev7_known() {

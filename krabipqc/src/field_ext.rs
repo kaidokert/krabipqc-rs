@@ -4,7 +4,7 @@
 //! over `P: Personality` without naming the two disjoint modmath
 //! entry points explicitly.
 
-use fixed_bigint::{Ct, Nct, Personality};
+use const_num_traits::{Ct, Nct, Personality};
 use modmath::basic::montgomery::wide;
 use modmath::basic::pre_reduced as pr;
 

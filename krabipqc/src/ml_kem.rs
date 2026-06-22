@@ -15,7 +15,7 @@ macro_rules! per_set {
     ($mod:ident, $params:ident, $ek:expr, $dk:expr, $ct:expr, $doc:expr) => {
         #[doc = $doc]
         pub mod $mod {
-            use fixed_bigint::Ct;
+            use const_num_traits::Ct;
             use zeroize::Zeroizing;
 
             use crate::mlkem::kem;

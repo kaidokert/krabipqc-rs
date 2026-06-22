@@ -1,7 +1,7 @@
 //! K-PKE: the IND-CPA-secure base scheme that ML-KEM wraps with the FO
 //! transform. FIPS 203 Alg 12 (KeyGen), Alg 13 (Encrypt), Alg 14 (Decrypt).
 
-use fixed_bigint::Personality;
+use const_num_traits::Personality;
 use modmath::basic::pre_reduced as pr;
 use zeroize::Zeroizing;
 
@@ -357,7 +357,7 @@ where
 mod tests {
     use super::*;
     use crate::mlkem::params::ML_KEM_768;
-    use fixed_bigint::Nct;
+    use const_num_traits::Nct;
 
     #[test]
     fn pke_roundtrip_768() {

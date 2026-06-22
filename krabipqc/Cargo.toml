@@ -25,15 +25,18 @@ lowmem = []
 
 [dependencies]
 # All Z_q arithmetic flows through modmath.
-modmath = { version = "0.3.1", features = ["wide-mul", "zeroize"] }
+modmath = { path = "/opt/m/rust/bigint/modmath-rs/modmath", version = "0.4.0", features = ["zeroize"] }
 
 # SHAKE-128 / SHAKE-256 / SHA3-256 / SHA3-512 wrappers in `hashing.rs`.
 sha3 = { version = "0.10", default-features = false }
 
-# `Personality` marker types (`Nct` / `Ct`). Zeroize feature on so
-# transitively-held `FixedUInt` buffers in the wide-mul path clear on
-# drop.
-fixed-bigint = { version = "0.3", default-features = false, features = ["zeroize"] }
+# `Personality` marker types (`Nct` / `Ct`) now live in const-num-traits.
+# fixed-bigint re-exports FixedUInt parameterised over them.
+fixed-bigint = { path = "/opt/m/rust/bigint/fixed-bigint-rs", version = "0.4.0", default-features = false, features = ["zeroize"] }
+
+# Ct / Nct / Personality used directly in krabipqc (no longer re-exported
+# through fixed-bigint in 0.4 — they now live in const-num-traits).
+const-num-traits = { path = "/opt/m/rust/bigint/num-traits", version = "0.1.0", default-features = false }
 
 # Constant-time primitives for the Ct personality.
 subtle = { version = "2.6", default-features = false }

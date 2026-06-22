@@ -6,7 +6,7 @@
 //! Verify's inputs are public, so the variable-time REDC finalize
 //! leaks nothing.
 
-use fixed_bigint::Personality;
+use const_num_traits::Personality;
 use zeroize::Zeroizing;
 
 use modmath::basic::pre_reduced as pr;
@@ -550,7 +550,7 @@ where
 mod tests {
     use super::*;
     use crate::params::{ML_DSA_44, ML_DSA_65, ML_DSA_87};
-    use fixed_bigint::{Ct, Nct};
+    use const_num_traits::{Ct, Nct};
 
     fn message_prime(ctx: &[u8], m: &[u8]) -> Vec<u8> {
         // FIPS 204 §5.2 M': 0x00 || |ctx| || ctx || M.

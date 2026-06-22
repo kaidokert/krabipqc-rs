@@ -4,7 +4,7 @@
 //! Internal API (`*_internal`) takes the random inputs as parameters
 //! so the result is deterministic — what NIST ACVP tests.
 
-use fixed_bigint::Personality;
+use const_num_traits::Personality;
 use zeroize::Zeroizing;
 
 use crate::encoding::EncodeError;
@@ -149,7 +149,7 @@ where
 mod tests {
     use super::*;
     use crate::mlkem::params::{ML_KEM_512, ML_KEM_768, ML_KEM_1024};
-    use fixed_bigint::{Ct, Nct};
+    use const_num_traits::{Ct, Nct};
 
     fn roundtrip<const K: usize>(params: &Params<K>) {
         let d = [0xAAu8; 32];
