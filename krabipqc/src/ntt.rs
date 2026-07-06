@@ -3,7 +3,7 @@
 //! Butterflies dispatch through [`FieldExt<P>`] so a single body
 //! serves both personalities (`Nct` / `Ct`).
 
-use fixed_bigint::Personality;
+use const_num_traits::Personality;
 use modmath::basic::pre_reduced as pr;
 
 use crate::field_ext::FieldExt;
@@ -197,7 +197,7 @@ pub fn mul_ntt<P: Personality + FieldExt<P>>(a: &Poly<u32>, b: &Poly<u32>) -> Po
 mod tests {
     use super::*;
 
-    use fixed_bigint::{Ct, Nct};
+    use const_num_traits::{Ct, Nct};
 
     #[test]
     fn bitrev8_known() {

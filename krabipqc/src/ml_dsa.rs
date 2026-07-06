@@ -12,7 +12,7 @@ macro_rules! per_set {
     ($mod:ident, $params:ident, $doc:expr) => {
         #[doc = $doc]
         pub mod $mod {
-            use fixed_bigint::{Ct, Nct};
+            use const_num_traits::{Ct, Nct};
 
             use crate::internal;
             use crate::params::$params;

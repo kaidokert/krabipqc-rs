@@ -7,7 +7,7 @@
 //! correlation attacks need `r` to interpret the trace — and `r`
 //! never leaves the function.
 
-use fixed_bigint::Personality;
+use const_num_traits::Personality;
 use modmath::basic::pre_reduced as pr;
 
 use crate::field_ext::FieldExt;

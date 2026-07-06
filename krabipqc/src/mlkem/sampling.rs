@@ -4,7 +4,7 @@
 //! * `SamplePolyCBD_eta` (Alg 7) — centered binomial distribution, used
 //!   for the secret/error polys.
 
-use fixed_bigint::Nct;
+use const_num_traits::Nct;
 use modmath::basic::pre_reduced as pr;
 
 use zeroize::Zeroizing;
