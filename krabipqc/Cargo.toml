@@ -30,9 +30,8 @@ modmath = { version = "0.4.0", features = ["zeroize"] }
 # SHAKE-128 / SHAKE-256 / SHA3-256 / SHA3-512 wrappers in `hashing.rs`.
 sha3 = { version = "0.10", default-features = false }
 
-# Ct / Nct / Personality — previously re-exported through fixed-bigint,
-# now live directly in const-num-traits in the 0.4 generation.
-# fixed-bigint itself has no remaining direct uses in krabipqc source.
+# Ct / Nct / Personality marker types; direct dep because krabipqc source
+# imports them directly — modmath does not re-export them.
 const-num-traits = { version = "0.1.1", default-features = false }
 
 # Constant-time primitives for the Ct personality.
