@@ -25,14 +25,14 @@ lowmem = []
 
 [dependencies]
 # All Z_q arithmetic flows through modmath.
-modmath = { version = "0.4.0", features = ["zeroize"] }
+modmath = { version = "0.5.0", features = ["zeroize"] }
 
 # SHAKE-128 / SHAKE-256 / SHA3-256 / SHA3-512 wrappers in `hashing.rs`.
 sha3 = { version = "0.10", default-features = false }
 
 # Ct / Nct / Personality marker types; direct dep because krabipqc source
 # imports them directly — modmath does not re-export them.
-const-num-traits = { version = "0.1.1", default-features = false }
+const-num-traits = { version = "0.2.0", default-features = false }
 
 # Constant-time primitives for the Ct personality.
 subtle = { version = "2.6", default-features = false }
@@ -57,6 +57,11 @@ signature = { version = "3", default-features = false, features = ["rand_core"] 
 # U2400 / U2420 / U3168 / U3309 / U4032 / U4627 / U4896 sizes used by
 # the per-set parameter sets.
 hybrid-array = { version = "0.4", features = ["zeroize", "extra-sizes"] }
+
+[patch.crates-io]
+modmath = { git = "https://github.com/kaidokert/modmath-rs", tag = "v0.5.0-alpha.1" }
+modmath-cios = { git = "https://github.com/kaidokert/modmath-rs", tag = "v0.5.0-alpha.1" }
+const-num-traits = { git = "https://github.com/kaidokert/num-traits", tag = "v0.2.0-alpha.1" }
 
 [[example]]
 name = "print_vector"

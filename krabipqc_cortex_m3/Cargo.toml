@@ -36,7 +36,7 @@ cortex-m-rt = "0.7"
 cortex-m-semihosting = "0.5"
 panic-semihosting = { version = "0.6", features = ["exit"] }
 krabipqc = { path = "../krabipqc" }
-modmath = { version = "0.4.0", default-features = false }
+modmath = { version = "0.5.0", default-features = false }
 hybrid-array = { version = "0.4", default-features = false }
 kem = { version = "0.3", default-features = false }
 signature = { version = "3", default-features = false }
@@ -46,6 +46,11 @@ codegen-units = 1
 debug = true
 lto = true
 opt-level = "z"
+
+[patch.crates-io]
+modmath = { git = "https://github.com/kaidokert/modmath-rs", tag = "v0.5.0-alpha.1" }
+modmath-cios = { git = "https://github.com/kaidokert/modmath-rs", tag = "v0.5.0-alpha.1" }
+const-num-traits = { git = "https://github.com/kaidokert/num-traits", tag = "v0.2.0-alpha.1" }
 
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(thumbv7m)'] }
