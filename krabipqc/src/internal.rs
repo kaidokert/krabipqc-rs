@@ -9,8 +9,6 @@
 use const_num_traits::Personality;
 use zeroize::Zeroizing;
 
-use modmath::basic::pre_reduced as pr;
-
 use crate::blinding;
 use crate::encoding;
 use crate::field_ext::FieldExt;
@@ -24,6 +22,7 @@ use crate::poly::Poly;
 use crate::polyvec::PolyVec;
 use crate::rounding::{high_bits, low_bits, make_hint, power2round_vec};
 use crate::sampling::{expand_a, expand_mask, expand_s, rej_ntt_poly, sample_in_ball};
+use crate::sb::{sb_add, sb_mul, sb_sub};
 
 /// KeyGen_internal (FIPS 204 Alg 6), generic over personality `P`.
 ///
@@ -74,12 +73,12 @@ where
             let a_ij = rej_ntt_poly(&rho, j as u8, i as u8);
             let p = ntt::mul_ntt::<P>(&a_ij, &s1_hat.v[j]);
             for n in 0..N {
-                acc.coeffs[n] = pr::add::<u32>(acc.coeffs[n], p.coeffs[n], Q);
+                acc.coeffs[n] = sb_add(acc.coeffs[n], p.coeffs[n], Q);
             }
         }
         ntt::inv_ntt::<P>(&mut acc);
         for n in 0..N {
-            acc.coeffs[n] = pr::add::<u32>(acc.coeffs[n], s2.v[i].coeffs[n], Q);
+            acc.coeffs[n] = sb_add(acc.coeffs[n], s2.v[i].coeffs[n], Q);
         }
         t.v[i] = acc;
     }
@@ -284,7 +283,7 @@ where
             let mut row: Zeroizing<Poly<u32>> = Zeroizing::new(ntt::mul_ntt::<P>(s1_src, &c_hat));
             ntt::inv_ntt::<P>(&mut row);
             for j in 0..N {
-                row.coeffs[j] = pr::add::<u32>(y.v[i].coeffs[j], row.coeffs[j], Q);
+                row.coeffs[j] = sb_add(y.v[i].coeffs[j], row.coeffs[j], Q);
             }
             for &c in &row.coeffs {
                 let a = abs_centered(c, Q);
@@ -314,7 +313,7 @@ where
                 Zeroizing::new(ntt::mul_ntt::<P>(s2_src, &c_hat));
             ntt::inv_ntt::<P>(&mut cs2_row);
             for j in 0..N {
-                w_buf.v[i].coeffs[j] = pr::sub::<u32>(w_buf.v[i].coeffs[j], cs2_row.coeffs[j], Q);
+                w_buf.v[i].coeffs[j] = sb_sub(w_buf.v[i].coeffs[j], cs2_row.coeffs[j], Q);
             }
         }
 
@@ -364,8 +363,8 @@ where
                 if a > ct0_norm {
                     ct0_norm = a;
                 }
-                let w_arg = pr::add::<u32>(w_buf.v[i].coeffs[j], ct0_ij, Q);
-                let z_arg = pr::sub::<u32>(0, ct0_ij, Q);
+                let w_arg = sb_add(w_buf.v[i].coeffs[j], ct0_ij, Q);
+                let z_arg = sb_sub(0, ct0_ij, Q);
                 let b = make_hint(z_arg, w_arg, params.gamma2);
                 if b == 1 {
                     if idx < params.omega {
@@ -503,12 +502,12 @@ where
             return false;
         };
         for k in 0..N {
-            t1_row.coeffs[k] = pr::mul::<u32>(t1_row.coeffs[k], two_d, Q);
+            t1_row.coeffs[k] = sb_mul(t1_row.coeffs[k], two_d, Q);
         }
         ntt::ntt::<P>(&mut t1_row);
         let ct1 = ntt::mul_ntt::<P>(&c_hat, &t1_row);
         for k in 0..N {
-            row.coeffs[k] = pr::sub::<u32>(row.coeffs[k], ct1.coeffs[k], Q);
+            row.coeffs[k] = sb_sub(row.coeffs[k], ct1.coeffs[k], Q);
         }
 
         ntt::inv_ntt::<P>(&mut row);

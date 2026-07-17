@@ -68,10 +68,15 @@ bench = false
 [dependencies]
 riscv-rt = "0.13"
 krabipqc = { path = "../krabipqc" }
-modmath = { version = "0.5.0", default-features = false }
+modmath = { version = "0.6.0", default-features = false }
 hybrid-array = { version = "0.4", default-features = false }
 kem = { version = "0.3", default-features = false }
 signature = { version = "3", default-features = false }
+
+[patch.crates-io]
+modmath = { git = "https://github.com/kaidokert/modmath-rs", tag = "v0.6.0-alpha.cios.25" }
+modmath-cios = { git = "https://github.com/kaidokert/modmath-rs", tag = "v0.6.0-alpha.cios.25" }
+const-num-traits = { git = "https://github.com/kaidokert/num-traits", tag = "v0.2.1-alpha.3" }
 
 [profile.release]
 codegen-units = 1

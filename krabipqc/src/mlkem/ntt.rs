@@ -6,9 +6,9 @@
 //! 128 invocations of `BaseCaseMultiply` (Alg 12), not the trivial
 //! elementwise product used by ML-DSA.
 
-use const_num_traits::Personality;
 #[cfg(test)]
-use modmath::basic::pre_reduced as pr;
+use crate::sb::{sb_exp, sb_mul};
+use const_num_traits::Personality;
 
 use crate::field_ext::FieldExt;
 #[cfg(test)]
@@ -147,7 +147,7 @@ pub const N_INV_128: u32 = 3303;
 fn compute_zetas() -> [u32; 128] {
     let mut z = [0u32; 128];
     for i in 0..128u32 {
-        z[i as usize] = pr::exp::<u32>(ZETA, bitrev7(i), Q);
+        z[i as usize] = sb_exp(ZETA, bitrev7(i), Q);
     }
     z
 }
@@ -158,7 +158,7 @@ fn compute_zetas() -> [u32; 128] {
 fn compute_gammas() -> [u32; 128] {
     let mut g = [0u32; 128];
     for i in 0..128u32 {
-        g[i as usize] = pr::exp::<u32>(ZETA, 2 * bitrev7(i) + 1, Q);
+        g[i as usize] = sb_exp(ZETA, 2 * bitrev7(i) + 1, Q);
     }
     g
 }
@@ -299,7 +299,7 @@ mod tests {
 
     #[test]
     fn n_inv_128_correct() {
-        assert_eq!(pr::mul::<u32>(N_INV_128, 128, Q), 1);
+        assert_eq!(sb_mul(N_INV_128, 128, Q), 1);
     }
 
     #[test]

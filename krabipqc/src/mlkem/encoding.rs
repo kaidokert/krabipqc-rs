@@ -130,7 +130,7 @@ pub(crate) fn byte_encode_vec<const LEN: usize>(
 mod tests {
     use super::*;
     use crate::params::to_signed;
-    use modmath::basic::pre_reduced as pr;
+    use crate::sb::sb_sub;
 
     #[test]
     fn compress_decompress_d_bounds() {
@@ -153,7 +153,7 @@ mod tests {
                 let xr = decompress_d(y, d);
                 // |xr - x| ≤ ceil(q / 2^(d+1))
                 let bound = (Q_VAL + (1u32 << (d + 1)) - 1) >> (d + 1);
-                let centered = to_signed(pr::sub::<u32>(xr, x, Q), Q).unsigned_abs();
+                let centered = to_signed(sb_sub(xr, x, Q), Q).unsigned_abs();
                 assert!(
                     centered <= bound,
                     "d={}, x={}, y={}, xr={}, centered diff={} > bound={}",
@@ -208,7 +208,7 @@ mod tests {
             let recovered = decompress_poly(&dp, d);
             let bound = (Q_VAL + (1u32 << (d + 1)) - 1) >> (d + 1);
             for (a, b) in p.coeffs.iter().zip(recovered.coeffs.iter()) {
-                let diff = to_signed(pr::sub::<u32>(*b, *a, Q), Q).unsigned_abs();
+                let diff = to_signed(sb_sub(*b, *a, Q), Q).unsigned_abs();
                 assert!(diff <= bound, "d={}, diff={} > bound={}", d, diff, bound);
             }
         }

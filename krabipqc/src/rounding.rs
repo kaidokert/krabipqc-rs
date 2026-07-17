@@ -10,10 +10,11 @@
 //! picked from `gamma2` by another mask blend), so the code runs in
 //! constant time on cores without a hardware divider too.
 
-use modmath::basic::pre_reduced as pr;
-
 use crate::params::{D, Gamma2, N, Q};
 use crate::polyvec::PolyVec;
+#[cfg(test)]
+use crate::sb::sb_mul;
+use crate::sb::{sb_add, sb_sub};
 
 /// Constant-time `(x / two_g, x % two_g)` via Barrett reduction.
 /// Caller-supplied `bf` must be the Barrett factor for `two_g`; `x`
@@ -89,7 +90,7 @@ pub fn decompose(r: u32, gamma2: Gamma2) -> (u32, u32) {
     let wrap_mask = 0u32.wrapping_sub(wrap);
 
     let (r1_nowrap, _) = barrett_div_rem(diff, two_g, bf);
-    let r0_minus1 = pr::sub::<u32>(r0_canon0, 1, Q);
+    let r0_minus1 = sb_sub(r0_canon0, 1, Q);
 
     let r1 = r1_nowrap & !wrap_mask;
     let r0_canon = (r0_canon0 & !wrap_mask) | (r0_minus1 & wrap_mask);
@@ -113,7 +114,7 @@ pub fn low_bits(r: u32, gamma2: Gamma2) -> u32 {
 /// `HighBits(r + z) != HighBits(r)`. `z` and `r` are canonical Z_q reps.
 pub fn make_hint(z: u32, r: u32, gamma2: Gamma2) -> u8 {
     let r1 = high_bits(r, gamma2);
-    let v1 = high_bits(pr::add::<u32>(r, z, Q), gamma2);
+    let v1 = high_bits(sb_add(r, z, Q), gamma2);
     let diff = r1 ^ v1;
     (((diff | diff.wrapping_neg()) >> 31) & 1) as u8
 }
@@ -158,8 +159,8 @@ mod tests {
         for &r in &[0u32, 1, gv, 2 * gv, Q / 2, Q - 1, Q - 2] {
             let (r1, r0) = decompose(r, g);
             let r0_signed = to_signed(r0, Q);
-            let r1_2g = pr::mul::<u32>(r1, 2 * gv, Q);
-            let recomb = pr::add::<u32>(r1_2g, from_signed(r0_signed, Q), Q);
+            let r1_2g = sb_mul(r1, 2 * gv, Q);
+            let recomb = sb_add(r1_2g, from_signed(r0_signed, Q), Q);
             assert_eq!(recomb, r);
             assert!(r1 < (Q - 1) / (2 * gv));
             assert!(r0_signed.unsigned_abs() <= gv);
@@ -183,7 +184,7 @@ mod tests {
         let two_g = 2 * gamma2;
         let r0_u = r_plus % two_g;
         let (r0_canon, r0_signed_neg) = if r0_u > gamma2 {
-            (pr::sub::<u32>(0, two_g - r0_u, Q), true)
+            (sb_sub(0, two_g - r0_u, Q), true)
         } else {
             (r0_u, false)
         };
@@ -193,7 +194,7 @@ mod tests {
             r_plus - r0_u
         };
         if diff == Q - 1 {
-            (0, pr::sub::<u32>(r0_canon, 1, Q))
+            (0, sb_sub(r0_canon, 1, Q))
         } else {
             (diff / two_g, r0_canon)
         }
@@ -219,10 +220,7 @@ mod tests {
         let half: u32 = 1 << (D - 1);
         let r0_u = r_plus & (two_d - 1);
         let (r0c, r1) = if r0_u > half {
-            (
-                pr::sub::<u32>(0, two_d - r0_u, Q),
-                (r_plus - r0_u + two_d) >> D,
-            )
+            (sb_sub(0, two_d - r0_u, Q), (r_plus - r0_u + two_d) >> D)
         } else {
             (r0_u, (r_plus - r0_u) >> D)
         };
@@ -231,7 +229,7 @@ mod tests {
 
     fn ref_make_hint(z: u32, r: u32, gamma2: u32) -> u8 {
         let r1 = ref_decompose(r, gamma2).0;
-        let v1 = ref_decompose(pr::add::<u32>(r, z, Q), gamma2).0;
+        let v1 = ref_decompose(sb_add(r, z, Q), gamma2).0;
         if r1 != v1 { 1 } else { 0 }
     }
 
@@ -241,8 +239,8 @@ mod tests {
         for &r in &[0u32, 1, 8191, 8192, 9000, Q / 2, Q - 1] {
             let (r1, r0) = power2round(r);
             let r0_signed = crate::params::to_signed(r0, Q);
-            let r1_2d = pr::mul::<u32>(r1, two_d, Q);
-            let recomb = pr::add::<u32>(r1_2d, crate::params::from_signed(r0_signed, Q), Q);
+            let r1_2d = sb_mul(r1, two_d, Q);
+            let recomb = sb_add(r1_2d, crate::params::from_signed(r0_signed, Q), Q);
             assert_eq!(recomb, r);
             assert!(r0_signed > -(1 << (D - 1)));
             assert!(r0_signed <= 1 << (D - 1));
@@ -284,7 +282,7 @@ mod tests {
             let z = crate::params::from_signed(z_signed, Q);
             let h = make_hint(z, r, g);
             let recovered = use_hint(h as u32, r, g);
-            let expected = high_bits(pr::add::<u32>(r, z, Q), g);
+            let expected = high_bits(sb_add(r, z, Q), g);
             assert_eq!(recovered, expected, "z={}, r={}, h={}", z_signed, r, h);
         }
     }
