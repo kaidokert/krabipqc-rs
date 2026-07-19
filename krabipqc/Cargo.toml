@@ -58,9 +58,6 @@ signature = { version = "3", default-features = false, features = ["rand_core"] 
 # the per-set parameter sets.
 hybrid-array = { version = "0.4", features = ["zeroize", "extra-sizes"] }
 
-[patch.crates-io]
-modmath = { git = "https://github.com/kaidokert/modmath-rs", tag = "v0.6.0-alpha.cios.36" }
-
 [[example]]
 name = "print_vector"
 required-features = ["acvp"]
