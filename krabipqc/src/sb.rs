@@ -1,7 +1,9 @@
-// All callers pass pre-reduced values (< q). These formulas are the same
-// branchless pre-reduced cores that modmath uses internally; they avoid both
-// the per-call SchoolbookField construction and the `% q` reduction that
-// SchoolbookField::reduce performs on already-canonical inputs.
+// All callers pass pre-reduced values (< q). These avoid the per-call
+// SchoolbookField construction and the `% q` in SchoolbookField::reduce, but
+// the `if sum >= q` branch is identical to modmath's basic_mod_add_pr — not
+// provably branchless. CT-clean implementations of callers (e.g. Ct-personality
+// NTT) rely on LLVM emitting cmov, which it does in practice but doesn't
+// guarantee. A genuinely CT add/sub would use arithmetic masking or subtle.
 
 #[inline(always)]
 pub(crate) fn sb_add(a: u32, b: u32, q: u32) -> u32 {
