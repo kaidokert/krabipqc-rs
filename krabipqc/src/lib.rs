@@ -52,6 +52,7 @@ pub(crate) mod polyvec;
 pub(crate) mod rounding;
 mod rustcrypto;
 pub(crate) mod sampling;
+pub(crate) mod sb;
 
 pub use ml_dsa::{ml_dsa_44, ml_dsa_65, ml_dsa_87};
 pub use ml_kem::{ml_kem_512, ml_kem_768, ml_kem_1024};

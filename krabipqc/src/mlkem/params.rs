@@ -123,7 +123,7 @@ pub const ML_KEM_1024: Params<4> = Params {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use modmath::basic::pre_reduced as pr;
+    use modmath::basic;
 
     #[test]
     fn sizes_512() {
@@ -149,7 +149,7 @@ mod tests {
     #[test]
     fn zeta_is_primitive_256th_root() {
         // zeta^128 = -1 mod q, zeta^256 = 1 mod q.
-        assert_eq!(pr::exp::<u32>(ZETA, 128, Q), Q - 1);
-        assert_eq!(pr::exp::<u32>(ZETA, 256, Q), 1);
+        assert_eq!(basic::exp(ZETA, 128, Q), Q - 1);
+        assert_eq!(basic::exp(ZETA, 256, Q), 1);
     }
 }

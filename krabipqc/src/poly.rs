@@ -3,14 +3,17 @@
 //! `Poly<T>` is the storage type — a fixed-size array of `N`
 //! coefficients of element type `T` (typically `u32`). The
 //! arithmetic methods (`add` / `sub` / `schoolbook_mul`) take the
-//! modulus as a runtime value of type `T` and delegate to the
-//! [`modmath::basic::pre_reduced`] surface, which assumes its inputs
-//! are already canonical (`< modulus`). Callers are responsible for
-//! upholding that precondition; passing out-of-range coefficients
+//! modulus as a runtime value of type `T`. All inputs must be
+//! canonical (`< modulus`); passing out-of-range coefficients
 //! produces undefined-but-deterministic output.
 
-use modmath::basic::pre_reduced as pr;
 use zeroize::Zeroize;
+
+use crate::sb::sb_add;
+#[cfg(test)]
+use crate::sb::sb_sub;
+#[cfg(test)]
+use modmath::basic;
 
 use crate::params::N;
 
@@ -18,9 +21,7 @@ use crate::params::N;
 ///
 /// `T` is the storage type of one coefficient. For the FIPS 203 / 204
 /// moduli (`q ≤ 2^23`) `T = u32` is the natural choice. The arithmetic
-/// methods on `Poly<u32>` route through
-/// `modmath::basic::pre_reduced::{add, sub, mul}`; the per-call
-/// `modulus` argument is the scheme's `q`.
+/// methods on `Poly<u32>` take the per-call `modulus` as the scheme's `q`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Poly<T> {
     pub coeffs: [T; N],
@@ -60,7 +61,7 @@ impl Poly<u32> {
     pub fn add(&self, other: &Self, modulus: u32) -> Self {
         let mut out = Self::zero();
         for i in 0..N {
-            out.coeffs[i] = pr::add::<u32>(self.coeffs[i], other.coeffs[i], modulus);
+            out.coeffs[i] = sb_add(self.coeffs[i], other.coeffs[i], modulus);
         }
         out
     }
@@ -70,7 +71,7 @@ impl Poly<u32> {
     pub fn sub(&self, other: &Self, modulus: u32) -> Self {
         let mut out = Self::zero();
         for i in 0..N {
-            out.coeffs[i] = pr::sub::<u32>(self.coeffs[i], other.coeffs[i], modulus);
+            out.coeffs[i] = sb_sub(self.coeffs[i], other.coeffs[i], modulus);
         }
         out
     }
@@ -83,12 +84,12 @@ impl Poly<u32> {
         let mut out = Self::zero();
         for i in 0..N {
             for j in 0..N {
-                let prod = pr::mul::<u32>(self.coeffs[i], other.coeffs[j], modulus);
+                let prod = basic::mul(self.coeffs[i], other.coeffs[j], modulus);
                 let k = i + j;
                 if k < N {
-                    out.coeffs[k] = pr::add::<u32>(out.coeffs[k], prod, modulus);
+                    out.coeffs[k] = sb_add(out.coeffs[k], prod, modulus);
                 } else {
-                    out.coeffs[k - N] = pr::sub::<u32>(out.coeffs[k - N], prod, modulus);
+                    out.coeffs[k - N] = sb_sub(out.coeffs[k - N], prod, modulus);
                 }
             }
         }
@@ -103,7 +104,7 @@ impl Poly<u32> {
     pub fn elementwise_mul(&self, other: &Self, modulus: u32) -> Self {
         let mut out = Self::zero();
         for i in 0..N {
-            out.coeffs[i] = pr::mul::<u32>(self.coeffs[i], other.coeffs[i], modulus);
+            out.coeffs[i] = basic::mul(self.coeffs[i], other.coeffs[i], modulus);
         }
         out
     }

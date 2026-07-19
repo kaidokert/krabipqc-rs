@@ -1,6 +1,6 @@
 [package]
 name = "krabipqc"
-version = "0.1.3"
+version = "0.1.4"
 edition = "2024"
 license = "Apache-2.0"
 description = "Prototype of no_std pqc"
@@ -25,14 +25,14 @@ lowmem = []
 
 [dependencies]
 # All Z_q arithmetic flows through modmath.
-modmath = { version = "0.5.0", features = ["zeroize"] }
+modmath = { version = "0.6.0", features = ["zeroize"] }
 
 # SHAKE-128 / SHAKE-256 / SHA3-256 / SHA3-512 wrappers in `hashing.rs`.
 sha3 = { version = "0.10", default-features = false }
 
 # Ct / Nct / Personality marker types; direct dep because krabipqc source
 # imports them directly — modmath does not re-export them.
-const-num-traits = { version = "0.2.0", default-features = false }
+const-num-traits = { version = "0.2.1", default-features = false }
 
 # Constant-time primitives for the Ct personality.
 subtle = { version = "2.6", default-features = false }

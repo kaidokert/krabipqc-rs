@@ -8,14 +8,12 @@
 //! never leaves the function.
 
 use const_num_traits::Personality;
-use modmath::basic::pre_reduced as pr;
 
 use crate::field_ext::FieldExt;
 use crate::hashing::shake256;
 use crate::poly::Poly;
 #[cfg(not(feature = "lowmem"))]
 use crate::polyvec::PolyVec;
-
 /// Derive a Montgomery-form blinding factor `r ∈ [1, q-1]` and its
 /// inverse `r^{-1}` (also in Mont form). The personality dispatch
 /// picks the variable-time or constant-time Mont conversion.
@@ -33,12 +31,37 @@ pub fn derive_pair<P: Personality + FieldExt<P>>(
     q_r2_mod_q: u32,
 ) -> (u32, u32) {
     let r = derive_r(absorb, q);
-    // Fermat inverse: r^(q-2) mod q. Once per call, not hot.
-    let r_inv = pr::exp::<u32>(r, q - 2, q);
-    (
-        <P as FieldExt<P>>::reduce(r, q, q_n_prime, q_r2_mod_q),
-        <P as FieldExt<P>>::reduce(r_inv, q, q_n_prime, q_r2_mod_q),
-    )
+    let r_mont = <P as FieldExt<P>>::reduce(r, q, q_n_prime, q_r2_mod_q);
+    // Fermat inverse via fixed-exponent square-and-multiply in Montgomery
+    // domain. The exponent q-2 is a public constant so the loop iterates
+    // its bits in fixed order — no secret-dependent branching. Each
+    // multiplication goes through P::mul_mont, which is CT for the Ct
+    // personality. The result is already in Montgomery form.
+    let r_inv_mont = mont_exp_fixed::<P>(r_mont, q - 2, q, q_n_prime, q_r2_mod_q);
+    (r_mont, r_inv_mont)
+}
+
+// Square-and-multiply with a public fixed exponent.
+// `base_mont` is the secret input in Montgomery form; `exp` must be a
+// public value (its bits control the loop, not secret data).
+fn mont_exp_fixed<P: Personality + FieldExt<P>>(
+    base_mont: u32,
+    exp: u32,
+    q: u32,
+    q_n_prime: u32,
+    q_r2_mod_q: u32,
+) -> u32 {
+    let mut result = <P as FieldExt<P>>::reduce(1, q, q_n_prime, q_r2_mod_q);
+    let mut base = base_mont;
+    let mut e = exp;
+    while e > 0 {
+        if e & 1 == 1 {
+            result = <P as FieldExt<P>>::mul_mont(result, base, q, q_n_prime);
+        }
+        base = <P as FieldExt<P>>::mul_mont(base, base, q, q_n_prime);
+        e >>= 1;
+    }
+    result
 }
 
 fn derive_r(absorb: &[&[u8]], q: u32) -> u32 {

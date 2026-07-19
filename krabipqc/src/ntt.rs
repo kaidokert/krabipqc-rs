@@ -4,13 +4,15 @@
 //! serves both personalities (`Nct` / `Ct`).
 
 use const_num_traits::Personality;
-use modmath::basic::pre_reduced as pr;
 
 use crate::field_ext::FieldExt;
 #[cfg(test)]
 use crate::params::ZETA;
 use crate::params::{N, Q, Q_N_PRIME, Q_R2_MOD_Q};
 use crate::poly::Poly;
+use crate::sb::sb_sub;
+#[cfg(test)]
+use modmath::basic;
 
 #[inline]
 fn reduce<P: FieldExt<P> + Personality>(x: u32) -> u32 {
@@ -85,7 +87,7 @@ const ZETAS: [u32; 256] = [
 fn compute_zetas() -> [u32; 256] {
     let mut z = [0u32; 256];
     for i in 0..256u32 {
-        z[i as usize] = pr::exp::<u32>(ZETA, bitrev8(i), Q);
+        z[i as usize] = basic::exp(ZETA, bitrev8(i), Q);
     }
     z
 }
@@ -168,7 +170,7 @@ pub fn inv_ntt<P: Personality + FieldExt<P>>(p: &mut Poly<u32>) {
         let mut start = 0;
         while start < N {
             k -= 1;
-            let zeta = pr::sub::<u32>(0, ZETAS_MONT[k], Q);
+            let zeta = sb_sub(0, ZETAS_MONT[k], Q);
             for j in start..start + len {
                 let a = p.coeffs[j];
                 let b = p.coeffs[j + len];
@@ -210,21 +212,21 @@ mod tests {
 
     #[test]
     fn n_inv_is_correct() {
-        assert_eq!(pr::mul::<u32>(N_INV, N as u32, Q), 1);
+        assert_eq!(basic::mul(N_INV, N as u32, Q), 1);
     }
 
     #[test]
     fn zeta_is_primitive_512th_root() {
         // zeta^256 = -1 (mod q), zeta^512 = 1 (mod q)
-        assert_eq!(pr::exp::<u32>(ZETA, 256, Q), Q - 1);
-        assert_eq!(pr::exp::<u32>(ZETA, 512, Q), 1);
+        assert_eq!(basic::exp(ZETA, 256, Q), Q - 1);
+        assert_eq!(basic::exp(ZETA, 512, Q), 1);
     }
 
     #[test]
     fn zetas_known_values() {
         let z = compute_zetas();
         assert_eq!(z[0], 1);
-        assert_eq!(z[1], pr::exp::<u32>(ZETA, 128, Q));
+        assert_eq!(z[1], basic::exp(ZETA, 128, Q));
         assert_eq!(z[1], 4808194);
     }
 

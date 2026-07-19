@@ -3,8 +3,7 @@
 //! `PolyVec<T, LEN>` and `PolyMatrix<T, K, L>` are storage shells over
 //! [`Poly<T>`]. Element-wise arithmetic (`add` / `sub`) takes the
 //! modulus as a runtime value and delegates to the per-coefficient
-//! `Poly` methods, which themselves route through
-//! [`modmath::basic::pre_reduced`].
+//! `Poly` methods.
 
 use zeroize::Zeroize;
 

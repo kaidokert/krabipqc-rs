@@ -6,7 +6,8 @@
 
 use const_num_traits::{Ct, Nct, Personality};
 use modmath::basic::montgomery::wide;
-use modmath::basic::pre_reduced as pr;
+
+use crate::sb::{sb_add, sb_sub};
 
 /// Montgomery-domain ops on raw `u32` reps, dispatched by `P`.
 /// The modulus constants (`q`, `n_prime = -q^-1 mod 2^32`,
@@ -32,16 +33,16 @@ pub trait FieldExt<P: Personality> {
     /// [`Self::mul_acc`].
     fn redc(acc_lo: u32, acc_hi: u32, q: u32, n_prime: u32) -> u32;
 
-    /// Mont-domain addition (= canonical add mod `q`).
+    /// Mont-domain addition.
     #[inline]
     fn add_mont(a: u32, b: u32, q: u32) -> u32 {
-        pr::add::<u32>(a, b, q)
+        sb_add(a, b, q)
     }
 
     /// Mont-domain subtraction.
     #[inline]
     fn sub_mont(a: u32, b: u32, q: u32) -> u32 {
-        pr::sub::<u32>(a, b, q)
+        sb_sub(a, b, q)
     }
 }
 

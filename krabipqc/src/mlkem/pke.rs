@@ -2,7 +2,6 @@
 //! transform. FIPS 203 Alg 12 (KeyGen), Alg 13 (Encrypt), Alg 14 (Decrypt).
 
 use const_num_traits::Personality;
-use modmath::basic::pre_reduced as pr;
 use zeroize::Zeroizing;
 
 use crate::blinding;
@@ -17,6 +16,7 @@ use crate::mlkem::params::{N, Params, Q, Q_N_PRIME, Q_R2_MOD_Q};
 use crate::mlkem::sampling::{expand_a, sample_e1_row, sample_ntt, sample_re_y_e2, sample_se};
 use crate::poly::Poly;
 use crate::polyvec::PolyVec;
+use crate::sb::{sb_add, sb_sub};
 
 /// FIPS 203 encodes NTT-domain polynomials (t_hat, s_hat) in their
 /// canonical form on the wire, but we store NTT-domain coefficients in
@@ -71,8 +71,7 @@ where
     for i in 0..K {
         ntt::mul_ntt_acc::<K, P>(&mut t_hat_raw.v[i], &a_hat.rows[i].v, &s_hat.v);
         for k in 0..N {
-            t_hat_raw.v[i].coeffs[k] =
-                pr::add::<u32>(t_hat_raw.v[i].coeffs[k], e_hat.v[i].coeffs[k], Q);
+            t_hat_raw.v[i].coeffs[k] = sb_add(t_hat_raw.v[i].coeffs[k], e_hat.v[i].coeffs[k], Q);
         }
     }
     let t_hat: Zeroizing<PolyVec<u32, K>> = Zeroizing::new(t_hat_raw);
@@ -137,18 +136,14 @@ where
         }
         let prod: Zeroizing<Poly<u32>> = Zeroizing::new(ntt::mul_ntt::<P>(&t_hat_j, &y.v[j]));
         for k in 0..N {
-            v_ntt.coeffs[k] = pr::add::<u32>(v_ntt.coeffs[k], prod.coeffs[k], Q);
+            v_ntt.coeffs[k] = sb_add(v_ntt.coeffs[k], prod.coeffs[k], Q);
         }
     }
     // in-place: avoids a copy.
     ntt::inv_ntt::<P>(&mut v_ntt);
     let mu: Zeroizing<Poly<u32>> = Zeroizing::new(decompress_poly(&byte_decode(m, 1)?, 1));
     for k in 0..N {
-        v_ntt.coeffs[k] = pr::add::<u32>(
-            pr::add::<u32>(v_ntt.coeffs[k], e2.coeffs[k], Q),
-            mu.coeffs[k],
-            Q,
-        );
+        v_ntt.coeffs[k] = sb_add(sb_add(v_ntt.coeffs[k], e2.coeffs[k], Q), mu.coeffs[k], Q);
     }
     let v_buf = v_ntt;
 
@@ -166,7 +161,7 @@ where
         ntt::inv_ntt::<P>(&mut u_row);
         let e1_i: Zeroizing<Poly<u32>> = Zeroizing::new(sample_e1_row::<K>(r, i, params.eta2)?);
         for k in 0..N {
-            u_row.coeffs[k] = pr::add::<u32>(u_row.coeffs[k], e1_i.coeffs[k], Q);
+            u_row.coeffs[k] = sb_add(u_row.coeffs[k], e1_i.coeffs[k], Q);
         }
         let u_row_compressed = compress_poly(&u_row, params.du);
         let slot = ct_out
@@ -227,17 +222,13 @@ where
         }
         let prod: Zeroizing<Poly<u32>> = Zeroizing::new(ntt::mul_ntt::<P>(&t_hat_j, &y.v[j]));
         for k in 0..N {
-            v_ntt.coeffs[k] = pr::add::<u32>(v_ntt.coeffs[k], prod.coeffs[k], Q);
+            v_ntt.coeffs[k] = sb_add(v_ntt.coeffs[k], prod.coeffs[k], Q);
         }
     }
     ntt::inv_ntt::<P>(&mut v_ntt);
     let mu: Zeroizing<Poly<u32>> = Zeroizing::new(decompress_poly(&byte_decode(m, 1)?, 1));
     for k in 0..N {
-        v_ntt.coeffs[k] = pr::add::<u32>(
-            pr::add::<u32>(v_ntt.coeffs[k], e2.coeffs[k], Q),
-            mu.coeffs[k],
-            Q,
-        );
+        v_ntt.coeffs[k] = sb_add(sb_add(v_ntt.coeffs[k], e2.coeffs[k], Q), mu.coeffs[k], Q);
     }
     let v_buf = v_ntt;
 
@@ -256,7 +247,7 @@ where
         ntt::inv_ntt::<P>(&mut u_row);
         let e1_i: Zeroizing<Poly<u32>> = Zeroizing::new(sample_e1_row::<K>(r, i, params.eta2)?);
         for k in 0..N {
-            u_row.coeffs[k] = pr::add::<u32>(u_row.coeffs[k], e1_i.coeffs[k], Q);
+            u_row.coeffs[k] = sb_add(u_row.coeffs[k], e1_i.coeffs[k], Q);
         }
         let u_row_compressed = compress_poly(&u_row, params.du);
         // max du = 11 → 32*11 = 352 bytes; sized for worst-case ML-KEM-1024.
@@ -334,7 +325,7 @@ where
 
         let prod: Zeroizing<Poly<u32>> = Zeroizing::new(ntt::mul_ntt::<P>(&s_row, &u_row));
         for k in 0..N {
-            w_ntt.coeffs[k] = pr::add::<u32>(w_ntt.coeffs[k], prod.coeffs[k], Q);
+            w_ntt.coeffs[k] = sb_add(w_ntt.coeffs[k], prod.coeffs[k], Q);
         }
     }
 
@@ -345,7 +336,7 @@ where
     let v_slice = ct.get(c1_len..).ok_or(EncodeError::BufferTooSmall)?;
     let v_prime = decompress_poly(&byte_decode(v_slice, params.dv)?, params.dv);
     for j in 0..N {
-        w_ntt.coeffs[j] = pr::sub::<u32>(v_prime.coeffs[j], w_ntt.coeffs[j], Q);
+        w_ntt.coeffs[j] = sb_sub(v_prime.coeffs[j], w_ntt.coeffs[j], Q);
     }
 
     let w_compressed = compress_poly(&w_ntt, 1);

@@ -5,9 +5,9 @@
 //!   for the secret/error polys.
 
 use const_num_traits::Nct;
-use modmath::basic::pre_reduced as pr;
-
 use zeroize::Zeroizing;
+
+use crate::sb::sb_sub;
 
 use crate::encoding::EncodeError;
 use crate::field_ext::FieldExt;
@@ -72,7 +72,7 @@ pub fn sample_poly_cbd(bytes: &[u8], eta: Eta) -> Result<Poly<u32>, EncodeError>
         for j in 0..eta_val {
             y += bit(base + eta_val + j)?;
         }
-        out.coeffs[i] = pr::sub::<u32>(x, y, Q);
+        out.coeffs[i] = sb_sub(x, y, Q);
     }
     Ok(out)
 }
