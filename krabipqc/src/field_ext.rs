@@ -33,7 +33,7 @@ pub trait FieldExt<P: Personality> {
     /// [`Self::mul_acc`].
     fn redc(acc_lo: u32, acc_hi: u32, q: u32, n_prime: u32) -> u32;
 
-    /// Mont-domain addition (= canonical add mod `q`).
+    /// Mont-domain addition.
     #[inline]
     fn add_mont(a: u32, b: u32, q: u32) -> u32 {
         sb_add(a, b, q)

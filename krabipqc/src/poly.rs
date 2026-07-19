@@ -21,8 +21,7 @@ use crate::params::N;
 ///
 /// `T` is the storage type of one coefficient. For the FIPS 203 / 204
 /// moduli (`q ≤ 2^23`) `T = u32` is the natural choice. The arithmetic
-/// methods on `Poly<u32>` route through `SchoolbookField`; the per-call
-/// `modulus` argument is the scheme's `q`.
+/// methods on `Poly<u32>` take the per-call `modulus` as the scheme's `q`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Poly<T> {
     pub coeffs: [T; N],
