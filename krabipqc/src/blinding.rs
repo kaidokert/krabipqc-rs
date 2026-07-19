@@ -14,7 +14,7 @@ use crate::hashing::shake256;
 use crate::poly::Poly;
 #[cfg(not(feature = "lowmem"))]
 use crate::polyvec::PolyVec;
-use crate::sb::sb_exp;
+use modmath::basic;
 
 /// Derive a Montgomery-form blinding factor `r ∈ [1, q-1]` and its
 /// inverse `r^{-1}` (also in Mont form). The personality dispatch
@@ -34,7 +34,7 @@ pub fn derive_pair<P: Personality + FieldExt<P>>(
 ) -> (u32, u32) {
     let r = derive_r(absorb, q);
     // Fermat inverse: r^(q-2) mod q. Once per call, not hot.
-    let r_inv = sb_exp(r, q - 2, q);
+    let r_inv = basic::exp(r, q - 2, q);
     (
         <P as FieldExt<P>>::reduce(r, q, q_n_prime, q_r2_mod_q),
         <P as FieldExt<P>>::reduce(r_inv, q, q_n_prime, q_r2_mod_q),

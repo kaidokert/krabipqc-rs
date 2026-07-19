@@ -3,17 +3,17 @@
 //! `Poly<T>` is the storage type — a fixed-size array of `N`
 //! coefficients of element type `T` (typically `u32`). The
 //! arithmetic methods (`add` / `sub` / `schoolbook_mul`) take the
-//! modulus as a runtime value of type `T` and delegate to
-//! `SchoolbookField`, which assumes its inputs are already canonical
-//! (`< modulus`). Callers are responsible for upholding that
-//! precondition; passing out-of-range coefficients produces
-//! undefined-but-deterministic output.
+//! modulus as a runtime value of type `T`. All inputs must be
+//! canonical (`< modulus`); passing out-of-range coefficients
+//! produces undefined-but-deterministic output.
 
 use zeroize::Zeroize;
 
 use crate::sb::sb_add;
 #[cfg(test)]
-use crate::sb::{sb_mul, sb_sub};
+use crate::sb::sb_sub;
+#[cfg(test)]
+use modmath::basic;
 
 use crate::params::N;
 
@@ -84,7 +84,7 @@ impl Poly<u32> {
         let mut out = Self::zero();
         for i in 0..N {
             for j in 0..N {
-                let prod = sb_mul(self.coeffs[i], other.coeffs[j], modulus);
+                let prod = basic::mul(self.coeffs[i], other.coeffs[j], modulus);
                 let k = i + j;
                 if k < N {
                     out.coeffs[k] = sb_add(out.coeffs[k], prod, modulus);
@@ -104,7 +104,7 @@ impl Poly<u32> {
     pub fn elementwise_mul(&self, other: &Self, modulus: u32) -> Self {
         let mut out = Self::zero();
         for i in 0..N {
-            out.coeffs[i] = sb_mul(self.coeffs[i], other.coeffs[i], modulus);
+            out.coeffs[i] = basic::mul(self.coeffs[i], other.coeffs[i], modulus);
         }
         out
     }

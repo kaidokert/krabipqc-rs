@@ -12,7 +12,7 @@ use crate::params::{N, Q, Q_N_PRIME, Q_R2_MOD_Q};
 use crate::poly::Poly;
 use crate::sb::sb_sub;
 #[cfg(test)]
-use crate::sb::{sb_exp, sb_mul};
+use modmath::basic;
 
 #[inline]
 fn reduce<P: FieldExt<P> + Personality>(x: u32) -> u32 {
@@ -87,7 +87,7 @@ const ZETAS: [u32; 256] = [
 fn compute_zetas() -> [u32; 256] {
     let mut z = [0u32; 256];
     for i in 0..256u32 {
-        z[i as usize] = sb_exp(ZETA, bitrev8(i), Q);
+        z[i as usize] = basic::exp(ZETA, bitrev8(i), Q);
     }
     z
 }
@@ -212,21 +212,21 @@ mod tests {
 
     #[test]
     fn n_inv_is_correct() {
-        assert_eq!(sb_mul(N_INV, N as u32, Q), 1);
+        assert_eq!(basic::mul(N_INV, N as u32, Q), 1);
     }
 
     #[test]
     fn zeta_is_primitive_512th_root() {
         // zeta^256 = -1 (mod q), zeta^512 = 1 (mod q)
-        assert_eq!(sb_exp(ZETA, 256, Q), Q - 1);
-        assert_eq!(sb_exp(ZETA, 512, Q), 1);
+        assert_eq!(basic::exp(ZETA, 256, Q), Q - 1);
+        assert_eq!(basic::exp(ZETA, 512, Q), 1);
     }
 
     #[test]
     fn zetas_known_values() {
         let z = compute_zetas();
         assert_eq!(z[0], 1);
-        assert_eq!(z[1], sb_exp(ZETA, 128, Q));
+        assert_eq!(z[1], basic::exp(ZETA, 128, Q));
         assert_eq!(z[1], 4808194);
     }
 

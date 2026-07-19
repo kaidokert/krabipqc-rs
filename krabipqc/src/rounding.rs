@@ -12,9 +12,9 @@
 
 use crate::params::{D, Gamma2, N, Q};
 use crate::polyvec::PolyVec;
-#[cfg(test)]
-use crate::sb::sb_mul;
 use crate::sb::{sb_add, sb_sub};
+#[cfg(test)]
+use modmath::basic;
 
 /// Constant-time `(x / two_g, x % two_g)` via Barrett reduction.
 /// Caller-supplied `bf` must be the Barrett factor for `two_g`; `x`
@@ -159,7 +159,7 @@ mod tests {
         for &r in &[0u32, 1, gv, 2 * gv, Q / 2, Q - 1, Q - 2] {
             let (r1, r0) = decompose(r, g);
             let r0_signed = to_signed(r0, Q);
-            let r1_2g = sb_mul(r1, 2 * gv, Q);
+            let r1_2g = basic::mul(r1, 2 * gv, Q);
             let recomb = sb_add(r1_2g, from_signed(r0_signed, Q), Q);
             assert_eq!(recomb, r);
             assert!(r1 < (Q - 1) / (2 * gv));
@@ -239,7 +239,7 @@ mod tests {
         for &r in &[0u32, 1, 8191, 8192, 9000, Q / 2, Q - 1] {
             let (r1, r0) = power2round(r);
             let r0_signed = crate::params::to_signed(r0, Q);
-            let r1_2d = sb_mul(r1, two_d, Q);
+            let r1_2d = basic::mul(r1, two_d, Q);
             let recomb = sb_add(r1_2d, crate::params::from_signed(r0_signed, Q), Q);
             assert_eq!(recomb, r);
             assert!(r0_signed > -(1 << (D - 1)));

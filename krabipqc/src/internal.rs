@@ -22,7 +22,8 @@ use crate::poly::Poly;
 use crate::polyvec::PolyVec;
 use crate::rounding::{high_bits, low_bits, make_hint, power2round_vec};
 use crate::sampling::{expand_a, expand_mask, expand_s, rej_ntt_poly, sample_in_ball};
-use crate::sb::{sb_add, sb_mul, sb_sub};
+use crate::sb::{sb_add, sb_sub};
+use modmath::basic;
 
 /// KeyGen_internal (FIPS 204 Alg 6), generic over personality `P`.
 ///
@@ -502,7 +503,7 @@ where
             return false;
         };
         for k in 0..N {
-            t1_row.coeffs[k] = sb_mul(t1_row.coeffs[k], two_d, Q);
+            t1_row.coeffs[k] = basic::mul(t1_row.coeffs[k], two_d, Q);
         }
         ntt::ntt::<P>(&mut t1_row);
         let ct1 = ntt::mul_ntt::<P>(&c_hat, &t1_row);
