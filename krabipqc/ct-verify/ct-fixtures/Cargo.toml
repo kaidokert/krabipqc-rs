@@ -1,0 +1,23 @@
+[package]
+name = "ct-fixtures"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+# `staticlib` for the driver (cross-build → llvm-objdump the `.a`);
+# `rlib` so the taint harness can link the same symbols as a dependency.
+[lib]
+crate-type = ["staticlib", "rlib"]
+
+[features]
+# `panic-handler` makes the crate `no_std` with its own `#[panic_handler]`,
+# needed for the cross-built staticlib the asm-grep driver disassembles
+# (the driver passes `--features panic-handler` explicitly). Off by
+# default so the ctgrind crate can link this as an rlib into its std
+# binary, where std supplies the panic handler and a second would collide.
+default = []
+panic-handler = []
+
+[dependencies]
+krabipqc = { path = "../..", default-features = false }
+krabi-caliper = { version = "0.1", features = ["deterministic-rng"] }
