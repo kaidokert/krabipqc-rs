@@ -363,9 +363,7 @@ pub fn validate_hint_bytes<const K: usize>(hint: &[u8], omega: usize) -> bool {
             if pos as usize >= N {
                 return false;
             }
-            if let Some(p) = prev
-                && pos <= p
-            {
+            if matches!(prev, Some(p) if pos <= p) {
                 return false;
             }
             prev = Some(pos);

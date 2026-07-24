@@ -76,7 +76,7 @@ where
     }
     let t_hat: Zeroizing<PolyVec<u32, K>> = Zeroizing::new(t_hat_raw);
 
-    let t_hat_canon: Zeroizing<PolyVec<u32, K>> = Zeroizing::new(polyvec_from_mont::<_, P>(&t_hat));
+    let t_hat_canon: Zeroizing<PolyVec<u32, K>> = Zeroizing::new(polyvec_from_mont::<K, P>(&t_hat));
     let t_hat_slot = ek_out
         .get_mut(..384 * K)
         .ok_or(EncodeError::BufferTooSmall)?;
@@ -89,7 +89,7 @@ where
     }
     rho_slot.copy_from_slice(&rho);
 
-    let s_hat_canon: Zeroizing<PolyVec<u32, K>> = Zeroizing::new(polyvec_from_mont::<_, P>(&s_hat));
+    let s_hat_canon: Zeroizing<PolyVec<u32, K>> = Zeroizing::new(polyvec_from_mont::<K, P>(&s_hat));
     byte_encode_vec(&s_hat_canon, 12, dk_out)?;
     Ok(())
 }
