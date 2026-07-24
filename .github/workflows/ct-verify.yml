@@ -3,9 +3,9 @@ name: CT verify
 on:
   pull_request:
     paths:
-      - "ct-verify/**"
-      - "src/**"
-      - "Cargo.toml"
+      - "krabipqc/ct-verify/**"
+      - "krabipqc/src/**"
+      - "krabipqc/Cargo.toml"
       - ".github/workflows/ct-verify.yml"
   push:
     branches: ["**"]
@@ -17,8 +17,11 @@ env:
   CARGO_TERM_COLOR: always
   CALIPER_TAG: v0.1.0-alpha.2
 
+permissions:
+  contents: read
+
 concurrency:
-  group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
+  group: ct-verify-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -37,8 +40,6 @@ jobs:
           - runs-on: ubuntu-24.04-arm
             rustflags: ""
     runs-on: ${{ matrix.runs-on }}
-    permissions:
-      contents: read
     steps:
       - uses: actions/checkout@v4
         with:
@@ -52,7 +53,7 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             ~/.cargo/bin/cargo-krabi-caliper
-          key: ct-ctgrind-${{ env.CALIPER_TAG }}-${{ matrix.runs-on }}-${{ hashFiles('ct-verify/**/Cargo.toml', 'Cargo.toml') }}
+          key: ct-ctgrind-${{ env.CALIPER_TAG }}-${{ matrix.runs-on }}-${{ hashFiles('krabipqc/ct-verify/**/Cargo.toml', 'krabipqc/Cargo.toml') }}
           restore-keys: ct-ctgrind-${{ env.CALIPER_TAG }}-${{ matrix.runs-on }}-
       - name: Install krabi-caliper CLI
         run: |
@@ -61,7 +62,7 @@ jobs:
               --tag "$CALIPER_TAG" --features cli,campaign --locked krabi-caliper
           fi
       - name: Taint gate
-        working-directory: ct-verify
+        working-directory: krabipqc/ct-verify
         env:
           RUSTFLAGS: ${{ matrix.rustflags }}
         run: |
@@ -71,12 +72,9 @@ jobs:
 
   # Cross-target assembly ladder: cross-build fixture staticlib per ISA,
   # disassemble, and assert each ct_fix__* symbol carries at most
-  # ladder_allowed_branches conditional branches. Calibrate that ceiling
-  # after the first CI run; tighten to the observed count + a small margin.
+  # ladder_allowed_branches conditional branches.
   ladder:
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
     strategy:
       fail-fast: false
       matrix:
@@ -99,19 +97,16 @@ jobs:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
-          key: ct-ladder-${{ matrix.target }}-${{ hashFiles('ct-verify/**/Cargo.toml', 'Cargo.toml') }}
+          key: ct-ladder-${{ matrix.target }}-${{ hashFiles('krabipqc/ct-verify/**/Cargo.toml', 'krabipqc/Cargo.toml') }}
           restore-keys: ct-ladder-${{ matrix.target }}-
       - name: Ladder gate
-        working-directory: ct-verify
+        working-directory: krabipqc/ct-verify
         run: cargo run --release -p ct-driver -- --target ${{ matrix.target }}
 
   # Linker-DCE panic-free audit: cross-build decaps path as a staticlib and
-  # assert llvm-nm finds no core::panicking machinery. A reachable panic in a
-  # KEM is both a DoS edge and a timing oracle.
+  # assert llvm-nm finds no core::panicking machinery.
   panic-audit:
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
     strategy:
       fail-fast: false
       matrix:
@@ -132,7 +127,7 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             ~/.cargo/bin/cargo-krabi-caliper
-          key: ct-panic-${{ env.CALIPER_TAG }}-${{ matrix.target }}-${{ hashFiles('ct-verify/**/Cargo.toml', 'Cargo.toml') }}
+          key: ct-panic-${{ env.CALIPER_TAG }}-${{ matrix.target }}-${{ hashFiles('krabipqc/ct-verify/**/Cargo.toml', 'krabipqc/Cargo.toml') }}
           restore-keys: ct-panic-${{ env.CALIPER_TAG }}-${{ matrix.target }}-
       - name: Install krabi-caliper CLI
         run: |
@@ -141,7 +136,7 @@ jobs:
               --tag "$CALIPER_TAG" --features cli,campaign --locked krabi-caliper
           fi
       - name: Panic-free audit
-        working-directory: ct-verify
+        working-directory: krabipqc/ct-verify
         run: |
           cargo krabi-caliper panic-audit --workspace . --package panic-free-audit \
             --target ${{ matrix.target }} --features panic-handler \
