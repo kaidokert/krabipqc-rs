@@ -11,6 +11,9 @@
 
 #![cfg_attr(feature = "panic-handler", no_std)]
 
+#[cfg(feature = "neg-controls")]
+mod neg_controls;
+
 #[cfg(feature = "panic-handler")]
 #[panic_handler]
 fn panic(_: &core::panic::PanicInfo) -> ! {

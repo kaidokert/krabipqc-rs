@@ -138,4 +138,7 @@ jobs:
         run: |
           cargo krabi-caliper panic-audit --workspace . --package panic-free-audit \
             --target ${{ matrix.target }} --features panic-handler \
-            --owned-symbol '.*'
+            --negative-features neg-controls --owned-symbol '.*' \
+            --expect-negative panic_audit__neg__bounds_check \
+            --expect-negative panic_audit__neg__unwrap \
+            --expect-negative panic_audit__neg__expect

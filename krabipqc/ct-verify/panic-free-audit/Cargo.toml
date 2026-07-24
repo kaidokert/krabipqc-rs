@@ -16,6 +16,9 @@ default = []
 # Enabled by the shared panic-audit command; makes the crate no_std with
 # its own #[panic_handler] so `panic!` sites are the only panic machinery.
 panic-handler = []
+# Deliberately-panicky controls; built separately so the audit can verify
+# they trip and the audit tooling is wired up correctly.
+neg-controls = []
 
 [dependencies]
 krabipqc = { path = "../..", default-features = false }
