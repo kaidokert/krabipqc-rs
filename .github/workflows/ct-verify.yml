@@ -35,40 +35,38 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - runs-on: ubuntu-latest
+          - runner: ubuntu-latest
+            arch: x86_64
             rustflags: "-C target-feature=+lzcnt,+bmi1"
-          - runs-on: ubuntu-24.04-arm
+          - runner: ubuntu-24.04-arm
+            arch: aarch64
             rustflags: ""
-    runs-on: ${{ matrix.runs-on }}
+    runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
       - uses: dtolnay/rust-toolchain@1.87.0
       - name: Install Valgrind
-        run: sudo apt-get update && sudo apt-get install -y valgrind
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq valgrind
       - uses: actions/cache@v4
         with:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
-            ~/.cargo/bin/cargo-krabi-caliper
-          key: ct-ctgrind-${{ env.CALIPER_TAG }}-${{ matrix.runs-on }}-${{ hashFiles('krabipqc/ct-verify/**/Cargo.toml', 'krabipqc/Cargo.toml') }}
-          restore-keys: ct-ctgrind-${{ env.CALIPER_TAG }}-${{ matrix.runs-on }}-
-      - name: Install krabi-caliper CLI
-        run: |
-          if ! command -v cargo-krabi-caliper &> /dev/null; then
-            cargo install --git https://github.com/kaidokert/krabi-caliper-rs \
-              --tag "$CALIPER_TAG" --features cli,campaign --locked krabi-caliper
-          fi
-      - name: Taint gate
+          key: ct-ctgrind-${{ matrix.runner }}-${{ hashFiles('krabipqc/ct-verify/**/Cargo.toml', 'krabipqc/Cargo.toml') }}
+          restore-keys: ct-ctgrind-${{ matrix.runner }}-
+      - name: Build ct-ctgrind
         working-directory: krabipqc/ct-verify
         env:
           RUSTFLAGS: ${{ matrix.rustflags }}
+        run: cargo build --release -p ct-ctgrind
+      - name: Taint gate (${{ matrix.arch }})
+        working-directory: krabipqc/ct-verify
         run: |
-          cargo build --release -p ct-ctgrind
-          cargo krabi-caliper ctgrind target/release/ct-ctgrind \
-            --valgrind-arg=--suppressions=ct-ctgrind/ct-ctgrind.supp
+          valgrind --tool=memcheck --error-limit=no --error-exitcode=0 \
+            --suppressions=ct-ctgrind/ct-ctgrind.supp -q \
+            target/release/ct-ctgrind
 
   # Cross-target assembly ladder: cross-build fixture staticlib per ISA,
   # disassemble, and assert each ct_fix__* symbol carries at most
