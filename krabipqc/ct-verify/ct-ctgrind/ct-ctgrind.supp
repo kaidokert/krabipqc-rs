@@ -1,0 +1,4 @@
+# Valgrind memcheck suppressions for ct-ctgrind.
+# Add suppressions here if CI surfaces false positives from test
+# infrastructure (inventory registration, Rust runtime init, etc.)
+# that are unrelated to the krabipqc CT paths under test.

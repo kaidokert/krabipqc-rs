@@ -1,0 +1,81 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: ["**"]
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: "-Dwarnings"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        rust:
+          - 1.87.0  # MSRV
+          - stable
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ matrix.rust }}
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: ci-test-${{ matrix.rust }}-${{ hashFiles('Cargo.toml') }}
+          restore-keys: ci-test-${{ matrix.rust }}-
+      - name: Test
+        run: cargo test --release
+
+  no-std:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        target:
+          - thumbv7m-none-eabi
+          - riscv32imac-unknown-none-elf
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: ci-nostd-${{ matrix.target }}-${{ hashFiles('Cargo.toml') }}
+          restore-keys: ci-nostd-${{ matrix.target }}-
+      - name: Build no_std
+        run: cargo build --target ${{ matrix.target }}
+
+  acvp:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: ci-acvp-${{ hashFiles('Cargo.toml') }}
+          restore-keys: ci-acvp-
+      - name: Test with acvp feature
+        run: cargo test --release --features acvp
