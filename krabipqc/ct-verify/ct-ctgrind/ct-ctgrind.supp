@@ -16,9 +16,13 @@
    fun:ct_fix__mlkem_decaps__*
 }
 # Same false positive on aarch64 where the compiler outlines the Keccak
-# round function into a separate symbol.
+# round function into a separate symbol.  The wildcard on the function
+# name makes the suppression stable across code changes that shift the
+# OUTLINED_FUNCTION_N index; the caller frame narrows it to the decaps
+# fixtures so real leaks in other outlined code still trip.
 {
    mlkem-decaps-shake-z-aarch64-outlined
    Memcheck:Value8
-   fun:OUTLINED_FUNCTION_46
+   fun:OUTLINED_FUNCTION_*
+   fun:ct_fix__mlkem_decaps__*
 }
