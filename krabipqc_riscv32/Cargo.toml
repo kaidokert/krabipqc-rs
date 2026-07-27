@@ -67,6 +67,7 @@ bench = false
 
 [dependencies]
 riscv-rt = "0.13"
+krabi-caliper = { version = "0.1.3", features = ["risc-v", "stack"] }
 krabipqc = { path = "../krabipqc" }
 modmath = { version = "0.6.0", default-features = false }
 hybrid-array = { version = "0.4", default-features = false }

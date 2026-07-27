@@ -4,54 +4,57 @@
 //!
 //! Provides:
 //! * A deterministic ML-DSA-44 test vector (in [`test_vector`]).
-//! * A `test_fixture` that paints the stack, runs the closure, prints
-//!   `<algo> ACCEPT|REJECT` and a `METRIC stack:N cycles:K target:... algo:... backend:...`
-//!   line over semihosting, then exits QEMU.
+//! * A `test_fixture` that measures one operation with `krabi-caliper`, emits
+//!   canonical evidence over semihosting, then exits QEMU.
 //! * A `fake_verify` stub baseline (returns true after touching the inputs
 //!   so the call is not optimized away) used to measure the harness overhead.
 
 use core::hint::black_box;
 use cortex_m_semihosting::{debug, hprintln};
+use krabi_caliper::cortex_m::{FootprintConfig, run_footprint};
+use krabi_caliper::report::Field;
 
-pub mod cyclecount;
-pub mod stack;
 pub mod test_vector;
 
-use cyclecount::CycleCounter;
-use stack::{check_stack_high_water_mark, paint_stack};
+krabi_caliper::cortex_m_systick_overflow_handler!();
 
 pub fn target_arch_name() -> &'static str {
     "thumbv7m"
 }
 
 pub fn test_fixture(testable: fn() -> bool, algo: &str, backend: &str) {
-    hprintln!("setup");
-    // No semihosting between paint_stack and testable: semihosting
-    // calls cost tens of thousands of cycles AND use stack space, so
-    // any print inside the measured window inflates both the
-    // reported cycle count and the high-water mark.
-    paint_stack();
-    let counter = CycleCounter::new();
-    let result = testable();
-    let elapsed = counter.elapsed() / 1000; // cycles reported in thousands
-    let stack = check_stack_high_water_mark();
-    if result {
-        hprintln!("{} ACCEPT", algo);
-    } else {
-        hprintln!("{} REJECT", algo);
-    }
-    hprintln!(
-        "METRIC stack:{} cycles:{} target:{} algo:{} backend:{}",
-        stack,
-        elapsed,
-        target_arch_name(),
-        algo,
-        backend
-    );
-    if result {
-        debug::exit(debug::EXIT_SUCCESS);
-    } else {
-        debug::exit(debug::EXIT_FAILURE);
+    let fields = [
+        Field::token("architecture", target_arch_name()),
+        Field::token("backend", backend),
+    ];
+    let result = unsafe {
+        run_footprint::<256, _>(
+            || {
+                krabi_caliper::protocol::semihosting::init()
+                    .expect("failed to open semihosting stdout")
+            },
+            FootprintConfig::new(algo, &fields),
+            testable,
+        )
+    };
+    match result {
+        Ok(true) => debug::exit(debug::EXIT_SUCCESS),
+        Ok(false) => {
+            hprintln!("MEASUREMENT FAILED");
+            debug::exit(debug::EXIT_FAILURE);
+        }
+        Err(krabi_caliper::FootprintError::CounterUnavailable) => {
+            hprintln!("MEASUREMENT ERROR: counter unavailable");
+            debug::exit(debug::EXIT_FAILURE);
+        }
+        Err(krabi_caliper::FootprintError::Stack(_)) => {
+            hprintln!("MEASUREMENT ERROR: invalid stack bounds");
+            debug::exit(debug::EXIT_FAILURE);
+        }
+        Err(krabi_caliper::FootprintError::Reporter(_)) => {
+            hprintln!("MEASUREMENT ERROR: reporter failed");
+            debug::exit(debug::EXIT_FAILURE);
+        }
     }
 }
 

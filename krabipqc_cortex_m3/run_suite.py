@@ -114,21 +114,25 @@ def text_size(example, features=()):
         return None
 
 
-METRIC_RE = re.compile(
-    r"METRIC stack:(\d+) cycles:(\d+) target:(\S+) algo:(\S+) backend:(\S+)"
+MEASUREMENT_RE = re.compile(
+    r"EM_MEASUREMENT schema:\d+ benchmark:(\S+) ticks:(\d+)"
+    r".* counter:systick.* architecture:(\S+) backend:(\S+)"
 )
+STACK_RE = re.compile(r"EM_STACK schema:\d+ benchmark:(\S+) used:(\d+)")
+OUTCOME_RE = re.compile(r"EM_OUTCOME schema:\d+ benchmark:(\S+) status:PASS(?: |$)")
 
 
 def parse_metric(output):
-    m = METRIC_RE.search(output)
-    if not m:
+    measurement = MEASUREMENT_RE.search(output)
+    stack = STACK_RE.search(output)
+    if not measurement or not stack or measurement.group(1) != stack.group(1):
         return None
     return {
-        "stack": int(m.group(1)),
-        "cycles": int(m.group(2)),
-        "target": m.group(3),
-        "algo": m.group(4),
-        "backend": m.group(5),
+        "stack": int(stack.group(2)),
+        "cycles": int(measurement.group(2)) // 1000,
+        "target": measurement.group(3),
+        "algo": measurement.group(1),
+        "backend": measurement.group(4),
     }
 
 
@@ -153,7 +157,9 @@ def main():
             rows.append((label, None, None, None, "TIMEOUT"))
             continue
 
-        accepted = f"{expected_algo} ACCEPT" in output
+        accepted = any(
+            match.group(1) == expected_algo for match in OUTCOME_RE.finditer(output)
+        )
         metric = parse_metric(output)
         tsize = text_size(example, features)
 
@@ -196,7 +202,7 @@ def main():
         print(f"| {label} | {tstr} | {sstr} | {cstr} | {status} |")
     print()
     print(
-        "Cycle counts come from the SysTick-based DWT counter in the harness "
+        "Cycle counts come from the SysTick counter in the harness "
         "and are reported in thousands. Treat them as a rough proxy, not a "
         "precise benchmark."
     )

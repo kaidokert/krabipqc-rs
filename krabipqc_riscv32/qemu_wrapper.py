@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""QEMU wrapper for RISC-V (virt) — kills QEMU after the METRIC line or on timeout.
+"""QEMU wrapper for RISC-V (virt) — stops after the outcome record or on timeout.
 
 The QEMU virt machine has no semihosting exit, so the binary loops forever
-after printing the METRIC line. This wrapper monitors the UART output (routed
+after printing its evidence. This wrapper monitors the UART output (routed
 to stdout via -nographic) and terminates QEMU as soon as it sees the line.
 """
 
@@ -40,20 +40,17 @@ def main():
     timer.start()
 
     accepted = False
-    metric_seen = False
+    outcome_seen = False
     try:
         for raw_line in iter(proc.stdout.readline, b""):
             line = raw_line.decode("utf-8", errors="replace").rstrip("\r\n")
             print(line, flush=True)
-            if " ACCEPT" in line:
-                accepted = True
-            if " REJECT" in line:
-                accepted = False
-            if line.startswith("METRIC "):
-                metric_seen = True
+            if line.startswith("EM_OUTCOME "):
+                outcome_seen = True
+                accepted = " status:PASS" in line
                 proc.terminate()
                 break
-            if line.startswith("PANIC:"):
+            if line.startswith(("PANIC:", "MEASUREMENT ERROR:")):
                 proc.terminate()
                 break
     finally:
@@ -68,7 +65,7 @@ def main():
         print("TIMEOUT", file=sys.stderr)
         return 1
 
-    return 0 if (accepted and metric_seen) else 1
+    return 0 if (accepted and outcome_seen) else 1
 
 
 if __name__ == "__main__":

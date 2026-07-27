@@ -2,22 +2,18 @@
 
 //! RISC-V (QEMU virt / riscv32imac) integration harness for `krabipqc`.
 //!
-//! Provides the same `test_fixture` surface as `krabipqc_cortex_m3` but
-//! outputs over the NS16550A UART (0x10000000) instead of semihosting,
-//! and loops forever after emitting the METRIC line — the `qemu_wrapper.py`
-//! script kills QEMU on that line since the virt machine has no exit
-//! mechanism.
+//! Provides the same `test_fixture` surface as `krabipqc_cortex_m3`, emitting
+//! canonical `krabi-caliper` evidence over the NS16550A UART. The
+//! `qemu_wrapper.py` script terminates QEMU after the outcome record.
 
 use core::fmt::Write;
 use core::hint::black_box;
+use krabi_caliper::report::{Field, TextReporter};
+use krabi_caliper::risc_v::{FootprintConfig, run_footprint};
 
-pub mod cyclecount;
-pub mod stack;
 pub mod test_vector;
 pub mod uart;
 
-use cyclecount::CycleCounter;
-use stack::{check_stack_high_water_mark, paint_stack};
 use uart::{UartWriter, uart_init};
 
 pub fn target_arch_name() -> &'static str {
@@ -26,33 +22,31 @@ pub fn target_arch_name() -> &'static str {
 
 pub fn test_fixture(testable: fn() -> bool, algo: &str, backend: &str) {
     uart_init();
-    // No UART calls between paint_stack and testable: I/O touches
-    // the stack and inflates both the high-water mark and cycle count.
-    paint_stack();
-    let counter = CycleCounter::new();
-    let result = testable();
-    let elapsed = counter.elapsed() / 1000; // report in thousands
-    let stack = check_stack_high_water_mark();
-
-    let mut w = UartWriter;
-    if result {
-        let _ = writeln!(w, "{} ACCEPT", algo);
-    } else {
-        let _ = writeln!(w, "{} REJECT", algo);
+    let fields = [
+        Field::token("architecture", target_arch_name()),
+        Field::token("backend", backend),
+    ];
+    let result = unsafe {
+        run_footprint::<256, _>(
+            || TextReporter::new(UartWriter),
+            FootprintConfig::new(algo, &fields),
+            testable,
+        )
+    };
+    if let Err(error) = result {
+        let mut writer = UartWriter;
+        let message = match error {
+            krabi_caliper::FootprintError::CounterUnavailable => {
+                "MEASUREMENT ERROR: counter unavailable"
+            }
+            krabi_caliper::FootprintError::Stack(_) => "MEASUREMENT ERROR: invalid stack bounds",
+            krabi_caliper::FootprintError::Reporter(_) => "MEASUREMENT ERROR: reporter failed",
+        };
+        let _ = writeln!(writer, "{message}");
     }
-    let _ = writeln!(
-        w,
-        "METRIC stack:{} cycles:{} target:{} algo:{} backend:{}",
-        stack,
-        elapsed,
-        target_arch_name(),
-        algo,
-        backend
-    );
 
-    // virt has no semihosting exit — loop and let qemu_wrapper.py kill QEMU.
     loop {
-        unsafe { core::arch::asm!("wfi") }
+        core::hint::spin_loop();
     }
 }
 
@@ -76,6 +70,6 @@ fn panic(info: &core::panic::PanicInfo) -> ! {
     let mut w = UartWriter;
     let _ = writeln!(w, "PANIC: {}", info);
     loop {
-        unsafe { core::arch::asm!("wfi") }
+        core::hint::spin_loop();
     }
 }
