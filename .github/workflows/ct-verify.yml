@@ -8,14 +8,16 @@ on:
       - "krabipqc/Cargo.toml"
       - ".github/workflows/ct-verify.yml"
   push:
-    branches: ["**"]
+    branches:
+      - main
+      - "feature/**"
   workflow_dispatch:
   schedule:
     - cron: "0 6 * * 2"  # Weekly on Tuesday at 06:00 UTC
 
 env:
   CARGO_TERM_COLOR: always
-  CALIPER_TAG: v0.1.0-alpha.2
+  CALIPER_VERSION: 0.1.4
 
 permissions:
   contents: read
@@ -46,7 +48,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
-      - uses: dtolnay/rust-toolchain@1.87.0
+      - uses: dtolnay/rust-toolchain@1.88.0
       - name: Install Valgrind
         run: sudo apt-get update -qq && sudo apt-get install -y -qq valgrind
       - uses: actions/cache@v4
@@ -54,7 +56,7 @@ jobs:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
-          key: ct-ctgrind-${{ matrix.runner }}-${{ hashFiles('krabipqc/ct-verify/**/Cargo.toml', 'krabipqc/Cargo.toml') }}
+          key: ct-ctgrind-${{ matrix.runner }}-${{ hashFiles('krabipqc/ct-verify/**/Cargo.toml', 'krabipqc/ct-verify/Cargo.lock', 'krabipqc/Cargo.toml') }}
           restore-keys: ct-ctgrind-${{ matrix.runner }}-
       - name: Build ct-ctgrind
         working-directory: krabipqc/ct-verify
@@ -86,7 +88,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
-      - uses: dtolnay/rust-toolchain@1.87.0
+      - uses: dtolnay/rust-toolchain@1.88.0
         with:
           targets: ${{ matrix.target }}
           components: llvm-tools
@@ -95,7 +97,7 @@ jobs:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
-          key: ct-ladder-${{ matrix.target }}-${{ hashFiles('krabipqc/ct-verify/**/Cargo.toml', 'krabipqc/Cargo.toml') }}
+          key: ct-ladder-${{ matrix.target }}-${{ hashFiles('krabipqc/ct-verify/**/Cargo.toml', 'krabipqc/ct-verify/Cargo.lock', 'krabipqc/Cargo.toml') }}
           restore-keys: ct-ladder-${{ matrix.target }}-
       - name: Ladder gate
         working-directory: krabipqc/ct-verify
@@ -115,7 +117,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
-      - uses: dtolnay/rust-toolchain@1.87.0
+      - uses: dtolnay/rust-toolchain@1.88.0
         with:
           targets: ${{ matrix.target }}
           components: llvm-tools
@@ -125,13 +127,13 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             ~/.cargo/bin/cargo-krabi-caliper
-          key: ct-panic-${{ env.CALIPER_TAG }}-${{ matrix.target }}-${{ hashFiles('krabipqc/ct-verify/**/Cargo.toml', 'krabipqc/Cargo.toml') }}
-          restore-keys: ct-panic-${{ env.CALIPER_TAG }}-${{ matrix.target }}-
+          key: ct-panic-${{ env.CALIPER_VERSION }}-${{ matrix.target }}-${{ hashFiles('krabipqc/ct-verify/**/Cargo.toml', 'krabipqc/ct-verify/Cargo.lock', 'krabipqc/Cargo.toml') }}
+          restore-keys: ct-panic-${{ env.CALIPER_VERSION }}-${{ matrix.target }}-
       - name: Install krabi-caliper CLI
         run: |
           if ! command -v cargo-krabi-caliper &> /dev/null; then
-            cargo install --git https://github.com/kaidokert/krabi-caliper-rs \
-              --tag "$CALIPER_TAG" --features cli,campaign --locked krabi-caliper
+            cargo install --version "$CALIPER_VERSION" \
+              --features cli,campaign --locked krabi-caliper
           fi
       - name: Panic-free audit
         working-directory: krabipqc/ct-verify
