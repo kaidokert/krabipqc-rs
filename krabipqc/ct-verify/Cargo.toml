@@ -9,7 +9,10 @@ members = [
     "ct-ctgrind",
     "ct-driver",
     "panic-free-audit",
+    "cyccnt-hardware",
 ]
+# The hardware binary only builds for the F407 target, so host commands use the
+# verification tools below unless the hardware package is selected explicitly.
 default-members = ["ct-fixtures", "ct-ctgrind", "ct-driver", "panic-free-audit"]
 
 # Deterministic codegen: the asm-grep / taint layers must inspect the
