@@ -249,9 +249,8 @@ pub fn mul_ntt<P: Personality + FieldExt<P>>(a: &Poly<u32>, b: &Poly<u32>) -> Po
     let mut ai = a.coeffs.iter();
     let mut bi = b.coeffs.iter();
     let mut oi = out.coeffs.iter_mut();
-    // Step through (a0,a1), (b0,b1), (c0,c1) pairs via consecutive .next()
-    // calls so no 2*i index arithmetic and no chunks_exact TrustedRandomAccess
-    // size() division reaches the archive.
+    // 2*i indexing emits panic_bounds_check at opt-level=z; chunks_exact Zip
+    // triggers TrustedRandomAccess::size() division — consecutive .next() avoids both.
     for &gamma_mont in &GAMMAS_MONT {
         if let (Some(&a0), Some(&a1), Some(&b0), Some(&b1), Some(c0), Some(c1)) = (
             ai.next(),
@@ -280,10 +279,8 @@ pub fn mul_ntt_acc<const K: usize, P: Personality + FieldExt<P>>(
     a_row: &[Poly<u32>; K],
     b_vec: &[Poly<u32>; K],
 ) {
-    // One iter() per polynomial, advanced two at a time via consecutive .next()
-    // calls — same trick as mul_ntt.  Avoids 2*i indexing and TrustedRandomAccess
-    // size() division entirely.  K iterators are stored in fixed-size arrays so
-    // the j < K array bound is compile-time provable.
+    // each_ref().map() keeps K iters in a fixed array (j < K compile-time provable);
+    // consecutive .next() avoids 2*i indexing and TrustedRandomAccess::size() division.
     let mut a_iters = a_row.each_ref().map(|p| p.coeffs.iter());
     let mut b_iters = b_vec.each_ref().map(|p| p.coeffs.iter());
     let mut oi = out.coeffs.iter_mut();

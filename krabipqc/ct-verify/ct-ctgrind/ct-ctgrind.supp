@@ -3,13 +3,10 @@
 # infrastructure (inventory registration, Rust runtime init, etc.)
 # that are unrelated to the krabipqc CT paths under test.
 
-# Suppress Memcheck:Value8 (arithmetic on tainted bytes) for the positive
-# decaps fixtures. SHAKE-256 absorbs the tainted implicit-rejection seed z
-# into Keccak u64 state words; all Keccak operations (XOR, theta/chi/rho/pi)
-# are data-oblivious — no secret-dependent branches — so Value8 errors here
-# are false positives from taint propagation through non-branching arithmetic.
-# Memcheck:Cond (secret-dependent branches) is NOT suppressed, so real CT
-# violations still trip the gate.
+# Suppress Memcheck:Value8 for the positive decaps fixtures. SHAKE-256 absorbs
+# tainted z into Keccak u64 state; Keccak ops (XOR, theta/chi/rho/pi) are
+# branch-free, so Value8 is a false positive. Memcheck:Cond is NOT suppressed,
+# so real CT violations still trip the gate.
 {
    mlkem-decaps-shake-z-x86
    Memcheck:Value8

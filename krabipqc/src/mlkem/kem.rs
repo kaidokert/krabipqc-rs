@@ -126,8 +126,7 @@ where
     let g_out = Zeroizing::new(sha3_512(&[&*m_prime, h_ek]));
     let mut k_prime = Zeroizing::new([0u8; 32]);
     let mut r_prime = Zeroizing::new([0u8; 32]);
-    // Iterator zip avoids any indexing panic: g_out[..32] and g_out[32..] are
-    // replaced by zip+skip so the type system carries the bounds.
+    // panic-audit: copy_from_slice would panic on length mismatch; zip+skip is unconditionally panic-free.
     for (k, g) in k_prime.iter_mut().zip(g_out.iter()) {
         *k = *g;
     }
