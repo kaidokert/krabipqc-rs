@@ -36,7 +36,8 @@ fn main() -> ExitCode {
             },
             // Matches all ct_fix__* positive fixtures so ladder_symbols_matched
             // == positives without needing --expect-ladder.
-            default_ladder: r"^ct_fix__",
+            // Leading _? covers Mach-O ELF symbol prefix on aarch64-apple-darwin.
+            default_ladder: r"^_?ct_fix__",
         },
     )
 }
