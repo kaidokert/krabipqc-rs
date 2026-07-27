@@ -19,6 +19,10 @@ panic-handler = []
 # Deliberately-panicky controls; built separately so the audit can verify
 # they trip and the audit tooling is wired up correctly.
 neg-controls = []
+# Cordon sha3/keccak: swap krabipqc's hashing module for zero-filling
+# stubs so the external dependency's internal panic sites don't appear in
+# the audit call graph.  sha3 is DCE'd from the final archive.
+stub-keccak = ["krabipqc/stub-hashing"]
 
 [dependencies]
 krabipqc = { path = "../..", default-features = false }

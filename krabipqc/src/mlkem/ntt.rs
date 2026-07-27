@@ -168,19 +168,25 @@ pub fn ntt<P: Personality + FieldExt<P>>(p: &mut Poly<u32>) {
     for c in p.coeffs.iter_mut() {
         *c = reduce::<P>(*c);
     }
-    let mut i: usize = 1;
+    let mut zeta_idx: usize = 1;
     let mut len: usize = 128;
     while len >= 2 {
         let mut start = 0;
         while start < N {
-            let zeta = ZETAS_MONT[i];
-            i += 1;
-            for j in start..start + len {
-                let a = p.coeffs[j];
-                let b = p.coeffs[j + len];
-                let t = mul_mont_p::<P>(zeta, b);
-                p.coeffs[j + len] = sub_mont::<P>(a, t);
-                p.coeffs[j] = add_mont::<P>(a, t);
+            if let (Some(&zeta), Some(seg)) = (
+                ZETAS_MONT.get(zeta_idx),
+                p.coeffs.get_mut(start..start + 2 * len),
+            ) {
+                zeta_idx += 1;
+                // split_at_mut(len) is panic-free: seg.len() == 2*len >= len always.
+                let (lo, hi) = seg.split_at_mut(len);
+                for (a_ref, b_ref) in lo.iter_mut().zip(hi.iter_mut()) {
+                    let a = *a_ref;
+                    let b = *b_ref;
+                    let t = mul_mont_p::<P>(zeta, b);
+                    *b_ref = sub_mont::<P>(a, t);
+                    *a_ref = add_mont::<P>(a, t);
+                }
             }
             start += 2 * len;
         }
@@ -190,18 +196,23 @@ pub fn ntt<P: Personality + FieldExt<P>>(p: &mut Poly<u32>) {
 
 /// Inverse NTT (FIPS 203 Algorithm 10).
 pub fn inv_ntt<P: Personality + FieldExt<P>>(p: &mut Poly<u32>) {
-    let mut i: usize = 127;
+    let mut zeta_idx: usize = 127;
     let mut len: usize = 2;
     while len <= 128 {
         let mut start = 0;
         while start < N {
-            let zeta = ZETAS_MONT[i];
-            i = i.wrapping_sub(1);
-            for j in start..start + len {
-                let a = p.coeffs[j];
-                let b = p.coeffs[j + len];
-                p.coeffs[j] = add_mont::<P>(a, b);
-                p.coeffs[j + len] = mul_mont_p::<P>(zeta, sub_mont::<P>(b, a));
+            if let (Some(&zeta), Some(seg)) = (
+                ZETAS_MONT.get(zeta_idx),
+                p.coeffs.get_mut(start..start + 2 * len),
+            ) {
+                zeta_idx = zeta_idx.wrapping_sub(1);
+                let (lo, hi) = seg.split_at_mut(len);
+                for (a_ref, b_ref) in lo.iter_mut().zip(hi.iter_mut()) {
+                    let a = *a_ref;
+                    let b = *b_ref;
+                    *a_ref = add_mont::<P>(a, b);
+                    *b_ref = mul_mont_p::<P>(zeta, sub_mont::<P>(b, a));
+                }
             }
             start += 2 * len;
         }

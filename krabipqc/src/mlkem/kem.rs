@@ -125,11 +125,15 @@ where
 
     let g_out = Zeroizing::new(sha3_512(&[&*m_prime, h_ek]));
     let mut k_prime = Zeroizing::new([0u8; 32]);
-    let k_prime_src = g_out.get(..32).ok_or(EncodeError::BufferTooSmall)?;
-    k_prime.copy_from_slice(k_prime_src);
     let mut r_prime = Zeroizing::new([0u8; 32]);
-    let r_prime_src = g_out.get(32..).ok_or(EncodeError::BufferTooSmall)?;
-    r_prime.copy_from_slice(r_prime_src);
+    // Iterator zip avoids any indexing panic: g_out[..32] and g_out[32..] are
+    // replaced by zip+skip so the type system carries the bounds.
+    for (k, g) in k_prime.iter_mut().zip(g_out.iter()) {
+        *k = *g;
+    }
+    for (r, g) in r_prime.iter_mut().zip(g_out.iter().skip(32)) {
+        *r = *g;
+    }
 
     let mut k_bar = Zeroizing::new([0u8; 32]);
     shake256(&[z, ct], &mut *k_bar);

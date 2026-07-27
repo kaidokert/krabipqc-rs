@@ -137,7 +137,7 @@ jobs:
         working-directory: krabipqc/ct-verify
         run: |
           cargo krabi-caliper panic-audit --workspace . --package panic-free-audit \
-            --target ${{ matrix.target }} --features panic-handler \
+            --target ${{ matrix.target }} --features panic-handler,stub-keccak \
             --negative-features neg-controls --owned-symbol '.*' \
             --expect-negative panic_audit__neg__bounds_check \
             --expect-negative panic_audit__neg__unwrap \

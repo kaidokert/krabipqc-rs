@@ -196,12 +196,10 @@ pub(crate) fn encrypt_compare_impl<const K: usize, P>(
 where
     P: Personality + FieldExt<P>,
 {
-    let mut rho = [0u8; 32];
-    let rho_src = ek.get(384 * K..).ok_or(EncodeError::BufferTooSmall)?;
-    if rho_src.len() != 32 {
-        return Err(EncodeError::BufferTooSmall);
-    }
-    rho.copy_from_slice(rho_src);
+    let rho: [u8; 32] = *ek
+        .get(384 * K..)
+        .and_then(|s| <&[u8; 32]>::try_from(s).ok())
+        .ok_or(EncodeError::BufferTooSmall)?;
 
     let (y_raw, e2_raw) = sample_re_y_e2::<K>(r, params.eta1, params.eta2)?;
     let mut y: Zeroizing<PolyVec<u32, K>> = Zeroizing::new(y_raw);
