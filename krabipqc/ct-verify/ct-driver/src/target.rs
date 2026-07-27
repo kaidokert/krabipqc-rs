@@ -41,7 +41,7 @@ pub const TARGETS: &[TargetSpec] = &[
         ladder_allowed_branches: 60,
         extra_cargo_args: &[],
     },
-    // Priority 3: 32-bit RISC-V (no compressed)
+    // Priority 3: 32-bit RISC-V without atomics (I+M+C: compressed, no 'a')
     TargetSpec {
         triple: "riscv32imc-unknown-none-elf",
         priority: 3,
@@ -51,6 +51,7 @@ pub const TARGETS: &[TargetSpec] = &[
         ladder_allowed_branches: 60,
         extra_cargo_args: &[],
     },
+    // Priority 3: 32-bit RISC-V with atomics (I+M+A+C)
     TargetSpec {
         triple: "riscv32imac-unknown-none-elf",
         priority: 3,
