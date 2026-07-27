@@ -2,6 +2,7 @@
 name = "ct-fixtures"
 version = "0.0.0"
 edition = "2021"
+rust-version = "1.88"
 publish = false
 
 # `staticlib` for the driver (cross-build → llvm-objdump the `.a`);
