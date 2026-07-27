@@ -15,3 +15,14 @@ REGION_ALIAS("REGION_DATA",   RAM);
 REGION_ALIAS("REGION_BSS",    RAM);
 REGION_ALIAS("REGION_HEAP",   RAM);
 REGION_ALIAS("REGION_STACK",  RAM);
+
+/* The firmware aborts rather than unwinds. Discard unwind metadata so lld
+ * does not place it near zero and overflow PC-relative relocations from the
+ * QEMU RAM image at 0x80000000. */
+SECTIONS {
+    /DISCARD/ : {
+        *(.eh_frame)
+        *(.eh_frame.*)
+        *(.eh_frame_hdr)
+    }
+}
