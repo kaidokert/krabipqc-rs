@@ -56,7 +56,7 @@ jobs:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
-          key: ct-ctgrind-${{ matrix.runner }}-${{ hashFiles('krabipqc/ct-verify/**/Cargo.toml', 'krabipqc/Cargo.toml') }}
+          key: ct-ctgrind-${{ matrix.runner }}-${{ hashFiles('krabipqc/ct-verify/**/Cargo.toml', 'krabipqc/ct-verify/Cargo.lock', 'krabipqc/Cargo.toml') }}
           restore-keys: ct-ctgrind-${{ matrix.runner }}-
       - name: Build ct-ctgrind
         working-directory: krabipqc/ct-verify
@@ -97,7 +97,7 @@ jobs:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
-          key: ct-ladder-${{ matrix.target }}-${{ hashFiles('krabipqc/ct-verify/**/Cargo.toml', 'krabipqc/Cargo.toml') }}
+          key: ct-ladder-${{ matrix.target }}-${{ hashFiles('krabipqc/ct-verify/**/Cargo.toml', 'krabipqc/ct-verify/Cargo.lock', 'krabipqc/Cargo.toml') }}
           restore-keys: ct-ladder-${{ matrix.target }}-
       - name: Ladder gate
         working-directory: krabipqc/ct-verify
@@ -127,7 +127,7 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             ~/.cargo/bin/cargo-krabi-caliper
-          key: ct-panic-${{ env.CALIPER_VERSION }}-${{ matrix.target }}-${{ hashFiles('krabipqc/ct-verify/**/Cargo.toml', 'krabipqc/Cargo.toml') }}
+          key: ct-panic-${{ env.CALIPER_VERSION }}-${{ matrix.target }}-${{ hashFiles('krabipqc/ct-verify/**/Cargo.toml', 'krabipqc/ct-verify/Cargo.lock', 'krabipqc/Cargo.toml') }}
           restore-keys: ct-panic-${{ env.CALIPER_VERSION }}-${{ matrix.target }}-
       - name: Install krabi-caliper CLI
         run: |
