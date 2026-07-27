@@ -1,0 +1,27 @@
+# Nested workspace for the constant-time verification harness. Kept
+# separate from the main crate (a standalone package, not a workspace)
+# so the pinned deterministic release profile applies to every harness
+# build without affecting krabipqc's own --release builds.
+[workspace]
+resolver = "2"
+members = [
+    "ct-fixtures",
+    "ct-ctgrind",
+    "ct-driver",
+    "panic-free-audit",
+]
+default-members = ["ct-fixtures", "ct-ctgrind", "ct-driver", "panic-free-audit"]
+
+# Deterministic codegen: the asm-grep / taint layers must inspect the
+# exact machine code a deployment build emits, and a passing run "locks"
+# that inspection — so a toolchain bump that perturbs codegen surfaces
+# as a reviewable diff rather than silent drift.
+[profile.release]
+lto = "fat"
+codegen-units = 1
+opt-level = "z"
+panic = "abort"
+incremental = false
+
+[patch.crates-io]
+krabi-caliper = { git = "https://github.com/kaidokert/krabi-caliper-rs", tag = "v0.1.0-alpha.2" }

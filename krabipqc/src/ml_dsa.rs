@@ -9,7 +9,7 @@
 //! not yet constant-time, so the Ct path is a partial guarantee.
 
 macro_rules! per_set {
-    ($mod:ident, $params:ident, $doc:expr) => {
+    ($mod:ident, $params:ident, $k:literal, $l:literal, $doc:expr) => {
         #[doc = $doc]
         pub mod $mod {
             use const_num_traits::{Ct, Nct};
@@ -33,7 +33,7 @@ macro_rules! per_set {
             ) -> Result<([u8; PK_BYTES], [u8; SK_BYTES]), EncodeError> {
                 let mut pk = [0u8; PK_BYTES];
                 let mut sk = [0u8; SK_BYTES];
-                internal::keygen_internal_impl::<_, _, Ct>(&$params, &xi.0, &mut pk, &mut sk)?;
+                internal::keygen_internal_impl::<$k, $l, Ct>(&$params, &xi.0, &mut pk, &mut sk)?;
                 Ok((pk, sk))
             }
 
@@ -50,7 +50,9 @@ macro_rules! per_set {
                 rnd: &SigningRandomness,
             ) -> Result<[u8; SIG_BYTES], EncodeError> {
                 let mut sig = [0u8; SIG_BYTES];
-                internal::sign_internal_impl::<_, _, Ct>(&$params, sk, m_prime, &rnd.0, &mut sig)?;
+                internal::sign_internal_impl::<$k, $l, Ct>(
+                    &$params, sk, m_prime, &rnd.0, &mut sig,
+                )?;
                 Ok(sig)
             }
 
@@ -66,7 +68,7 @@ macro_rules! per_set {
                 m_prime: &[u8],
                 sig: &[u8; SIG_BYTES],
             ) -> bool {
-                internal::verify_internal_impl::<_, _, Nct>(&$params, pk, m_prime, sig)
+                internal::verify_internal_impl::<$k, $l, Nct>(&$params, pk, m_prime, sig)
             }
 
             /// Pure ML-DSA Sign (FIPS 204 §5.2). Builds the message
@@ -82,7 +84,7 @@ macro_rules! per_set {
                 let ds = DomainSeparator::pure(ctx).ok_or(MessageError::CtxTooLong)?;
                 let (pieces, n) = ds.pieces(m);
                 let mut sig = [0u8; SIG_BYTES];
-                internal::sign_internal_impl_pieces::<_, _, Ct>(
+                internal::sign_internal_impl_pieces::<$k, $l, Ct>(
                     &$params,
                     sk,
                     &pieces[..n],
@@ -106,7 +108,12 @@ macro_rules! per_set {
                     return false;
                 };
                 let (pieces, n) = ds.pieces(m);
-                internal::verify_internal_impl_pieces::<_, _, Nct>(&$params, pk, &pieces[..n], sig)
+                internal::verify_internal_impl_pieces::<$k, $l, Nct>(
+                    &$params,
+                    pk,
+                    &pieces[..n],
+                    sig,
+                )
             }
 
             /// HashML-DSA Sign (FIPS 204 §5.4). Caller hashes the message
@@ -122,7 +129,7 @@ macro_rules! per_set {
                     .ok_or(MessageError::CtxTooLong)?;
                 let (pieces, n) = ds.pieces(&[]);
                 let mut sig = [0u8; SIG_BYTES];
-                internal::sign_internal_impl_pieces::<_, _, Ct>(
+                internal::sign_internal_impl_pieces::<$k, $l, Ct>(
                     &$params,
                     sk,
                     &pieces[..n],
@@ -145,7 +152,12 @@ macro_rules! per_set {
                     return false;
                 };
                 let (pieces, n) = ds.pieces(&[]);
-                internal::verify_internal_impl_pieces::<_, _, Nct>(&$params, pk, &pieces[..n], sig)
+                internal::verify_internal_impl_pieces::<$k, $l, Nct>(
+                    &$params,
+                    pk,
+                    &pieces[..n],
+                    sig,
+                )
             }
 
             /// RNG-driven ML-DSA KeyGen. Draws the 32-byte seed `ξ`
@@ -284,15 +296,21 @@ macro_rules! per_set {
 per_set!(
     ml_dsa_44,
     ML_DSA_44,
+    4,
+    4,
     "ML-DSA-44 (FIPS 204, parameter set 1): K=4, L=4, η=2, τ=39, λ=128.\n\nPublic key: 1312 B. Signature: 2420 B."
 );
 per_set!(
     ml_dsa_65,
     ML_DSA_65,
+    6,
+    5,
     "ML-DSA-65 (FIPS 204, parameter set 2): K=6, L=5, η=4, τ=49, λ=192.\n\nPublic key: 1952 B. Signature: 3309 B."
 );
 per_set!(
     ml_dsa_87,
     ML_DSA_87,
+    8,
+    7,
     "ML-DSA-87 (FIPS 204, parameter set 3): K=8, L=7, η=2, τ=60, λ=256.\n\nPublic key: 2592 B. Signature: 4627 B."
 );

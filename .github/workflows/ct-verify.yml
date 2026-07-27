@@ -1,0 +1,144 @@
+name: CT verify
+
+on:
+  pull_request:
+    paths:
+      - "krabipqc/ct-verify/**"
+      - "krabipqc/src/**"
+      - "krabipqc/Cargo.toml"
+      - ".github/workflows/ct-verify.yml"
+  push:
+    branches: ["**"]
+  workflow_dispatch:
+  schedule:
+    - cron: "0 6 * * 2"  # Weekly on Tuesday at 06:00 UTC
+
+env:
+  CARGO_TERM_COLOR: always
+  CALIPER_TAG: v0.1.0-alpha.2
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ct-verify-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # Valgrind taint gate: the primary whole-operation CT check for ML-KEM decaps.
+  # Marks dk bytes undefined, runs the full FO re-encrypt + implicit-rejection
+  # select, confirms no secret-dependent branch trips memcheck.
+  # x86_64 pins +lzcnt,+bmi1 so baseline leading_zeros doesn't lower to a
+  # data-dependent branch. aarch64 covers the other common host encoding.
+  ctgrind:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-latest
+            arch: x86_64
+            rustflags: "-C target-feature=+lzcnt,+bmi1"
+          - runner: ubuntu-24.04-arm
+            arch: aarch64
+            rustflags: ""
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@1.87.0
+      - name: Install Valgrind
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq valgrind
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: ct-ctgrind-${{ matrix.runner }}-${{ hashFiles('krabipqc/ct-verify/**/Cargo.toml', 'krabipqc/Cargo.toml') }}
+          restore-keys: ct-ctgrind-${{ matrix.runner }}-
+      - name: Build ct-ctgrind
+        working-directory: krabipqc/ct-verify
+        env:
+          RUSTFLAGS: ${{ matrix.rustflags }}
+        run: cargo build --release -p ct-ctgrind
+      - name: Taint gate (${{ matrix.arch }})
+        working-directory: krabipqc/ct-verify
+        run: |
+          valgrind --tool=memcheck --error-limit=no --error-exitcode=0 \
+            --suppressions=ct-ctgrind/ct-ctgrind.supp -q \
+            target/release/ct-ctgrind
+
+  # Cross-target assembly ladder: cross-build fixture staticlib per ISA,
+  # disassemble, and assert each ct_fix__* symbol carries at most
+  # ladder_allowed_branches conditional branches.
+  ladder:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        target:
+          - thumbv7em-none-eabi
+          - thumbv7m-none-eabi
+          - thumbv6m-none-eabi
+          - riscv32imc-unknown-none-elf
+          - riscv32imac-unknown-none-elf
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@1.87.0
+        with:
+          targets: ${{ matrix.target }}
+          components: llvm-tools
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: ct-ladder-${{ matrix.target }}-${{ hashFiles('krabipqc/ct-verify/**/Cargo.toml', 'krabipqc/Cargo.toml') }}
+          restore-keys: ct-ladder-${{ matrix.target }}-
+      - name: Ladder gate
+        working-directory: krabipqc/ct-verify
+        run: cargo run --release -p ct-driver -- --target ${{ matrix.target }}
+
+  # Linker-DCE panic-free audit: cross-build decaps path as a staticlib and
+  # assert llvm-nm finds no core::panicking machinery.
+  panic-audit:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        target:
+          - thumbv7m-none-eabi
+          - riscv32imc-unknown-none-elf
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@1.87.0
+        with:
+          targets: ${{ matrix.target }}
+          components: llvm-tools
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            ~/.cargo/bin/cargo-krabi-caliper
+          key: ct-panic-${{ env.CALIPER_TAG }}-${{ matrix.target }}-${{ hashFiles('krabipqc/ct-verify/**/Cargo.toml', 'krabipqc/Cargo.toml') }}
+          restore-keys: ct-panic-${{ env.CALIPER_TAG }}-${{ matrix.target }}-
+      - name: Install krabi-caliper CLI
+        run: |
+          if ! command -v cargo-krabi-caliper &> /dev/null; then
+            cargo install --git https://github.com/kaidokert/krabi-caliper-rs \
+              --tag "$CALIPER_TAG" --features cli,campaign --locked krabi-caliper
+          fi
+      - name: Panic-free audit
+        working-directory: krabipqc/ct-verify
+        run: |
+          cargo krabi-caliper panic-audit --workspace . --package panic-free-audit \
+            --target ${{ matrix.target }} --features panic-handler,stub-keccak \
+            --negative-features neg-controls --owned-symbol '.*' \
+            --expect-negative panic_audit__neg__bounds_check \
+            --expect-negative panic_audit__neg__unwrap \
+            --expect-negative panic_audit__neg__expect

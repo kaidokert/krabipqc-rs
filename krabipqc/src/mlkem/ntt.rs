@@ -168,19 +168,25 @@ pub fn ntt<P: Personality + FieldExt<P>>(p: &mut Poly<u32>) {
     for c in p.coeffs.iter_mut() {
         *c = reduce::<P>(*c);
     }
-    let mut i: usize = 1;
+    let mut zeta_idx: usize = 1;
     let mut len: usize = 128;
     while len >= 2 {
         let mut start = 0;
         while start < N {
-            let zeta = ZETAS_MONT[i];
-            i += 1;
-            for j in start..start + len {
-                let a = p.coeffs[j];
-                let b = p.coeffs[j + len];
-                let t = mul_mont_p::<P>(zeta, b);
-                p.coeffs[j + len] = sub_mont::<P>(a, t);
-                p.coeffs[j] = add_mont::<P>(a, t);
+            if let (Some(&zeta), Some(seg)) = (
+                ZETAS_MONT.get(zeta_idx),
+                p.coeffs.get_mut(start..start + 2 * len),
+            ) {
+                zeta_idx += 1;
+                // split_at_mut(len) is panic-free: seg.len() == 2*len >= len always.
+                let (lo, hi) = seg.split_at_mut(len);
+                for (a_ref, b_ref) in lo.iter_mut().zip(hi.iter_mut()) {
+                    let a = *a_ref;
+                    let b = *b_ref;
+                    let t = mul_mont_p::<P>(zeta, b);
+                    *b_ref = sub_mont::<P>(a, t);
+                    *a_ref = add_mont::<P>(a, t);
+                }
             }
             start += 2 * len;
         }
@@ -190,18 +196,23 @@ pub fn ntt<P: Personality + FieldExt<P>>(p: &mut Poly<u32>) {
 
 /// Inverse NTT (FIPS 203 Algorithm 10).
 pub fn inv_ntt<P: Personality + FieldExt<P>>(p: &mut Poly<u32>) {
-    let mut i: usize = 127;
+    let mut zeta_idx: usize = 127;
     let mut len: usize = 2;
     while len <= 128 {
         let mut start = 0;
         while start < N {
-            let zeta = ZETAS_MONT[i];
-            i = i.wrapping_sub(1);
-            for j in start..start + len {
-                let a = p.coeffs[j];
-                let b = p.coeffs[j + len];
-                p.coeffs[j] = add_mont::<P>(a, b);
-                p.coeffs[j + len] = mul_mont_p::<P>(zeta, sub_mont::<P>(b, a));
+            if let (Some(&zeta), Some(seg)) = (
+                ZETAS_MONT.get(zeta_idx),
+                p.coeffs.get_mut(start..start + 2 * len),
+            ) {
+                zeta_idx = zeta_idx.wrapping_sub(1);
+                let (lo, hi) = seg.split_at_mut(len);
+                for (a_ref, b_ref) in lo.iter_mut().zip(hi.iter_mut()) {
+                    let a = *a_ref;
+                    let b = *b_ref;
+                    *a_ref = add_mont::<P>(a, b);
+                    *b_ref = mul_mont_p::<P>(zeta, sub_mont::<P>(b, a));
+                }
             }
             start += 2 * len;
         }
@@ -235,16 +246,24 @@ fn base_case_mul<P: Personality + FieldExt<P>>(
 /// MultiplyNTTs (FIPS 203 Alg 11).
 pub fn mul_ntt<P: Personality + FieldExt<P>>(a: &Poly<u32>, b: &Poly<u32>) -> Poly<u32> {
     let mut out = Poly::<u32>::zero();
-    for (i, &gamma_mont) in GAMMAS_MONT.iter().enumerate() {
-        let (c0, c1) = base_case_mul::<P>(
-            a.coeffs[2 * i],
-            a.coeffs[2 * i + 1],
-            b.coeffs[2 * i],
-            b.coeffs[2 * i + 1],
-            gamma_mont,
-        );
-        out.coeffs[2 * i] = c0;
-        out.coeffs[2 * i + 1] = c1;
+    let mut ai = a.coeffs.iter();
+    let mut bi = b.coeffs.iter();
+    let mut oi = out.coeffs.iter_mut();
+    // 2*i indexing emits panic_bounds_check at opt-level=z; chunks_exact Zip
+    // triggers TrustedRandomAccess::size() division — consecutive .next() avoids both.
+    for &gamma_mont in &GAMMAS_MONT {
+        if let (Some(&a0), Some(&a1), Some(&b0), Some(&b1), Some(c0), Some(c1)) = (
+            ai.next(),
+            ai.next(),
+            bi.next(),
+            bi.next(),
+            oi.next(),
+            oi.next(),
+        ) {
+            let (r0, r1) = base_case_mul::<P>(a0, a1, b0, b1, gamma_mont);
+            *c0 = r0;
+            *c1 = r1;
+        }
     }
     out
 }
@@ -260,27 +279,37 @@ pub fn mul_ntt_acc<const K: usize, P: Personality + FieldExt<P>>(
     a_row: &[Poly<u32>; K],
     b_vec: &[Poly<u32>; K],
 ) {
-    for (i, &gamma_mont) in GAMMAS_MONT.iter().enumerate() {
+    // each_ref().map() keeps K iters in a fixed array (j < K compile-time provable);
+    // consecutive .next() avoids 2*i indexing and TrustedRandomAccess::size() division.
+    let mut a_iters = a_row.each_ref().map(|p| p.coeffs.iter());
+    let mut b_iters = b_vec.each_ref().map(|p| p.coeffs.iter());
+    let mut oi = out.coeffs.iter_mut();
+    for &gamma_mont in &GAMMAS_MONT {
         let (mut a0b0_lo, mut a0b0_hi) = (0u32, 0u32);
         let (mut a1b1_lo, mut a1b1_hi) = (0u32, 0u32);
         let (mut c1_lo, mut c1_hi) = (0u32, 0u32);
         for j in 0..K {
-            let a0 = a_row[j].coeffs[2 * i];
-            let a1 = a_row[j].coeffs[2 * i + 1];
-            let b0 = b_vec[j].coeffs[2 * i];
-            let b1 = b_vec[j].coeffs[2 * i + 1];
-            (a0b0_lo, a0b0_hi) = <P as FieldExt<P>>::mul_acc(a0b0_lo, a0b0_hi, a0, b0);
-            (a1b1_lo, a1b1_hi) = <P as FieldExt<P>>::mul_acc(a1b1_lo, a1b1_hi, a1, b1);
-            (c1_lo, c1_hi) = <P as FieldExt<P>>::mul_acc(c1_lo, c1_hi, a0, b1);
-            (c1_lo, c1_hi) = <P as FieldExt<P>>::mul_acc(c1_lo, c1_hi, a1, b0);
+            if let (Some(&a0), Some(&a1), Some(&b0), Some(&b1)) = (
+                a_iters[j].next(),
+                a_iters[j].next(),
+                b_iters[j].next(),
+                b_iters[j].next(),
+            ) {
+                (a0b0_lo, a0b0_hi) = <P as FieldExt<P>>::mul_acc(a0b0_lo, a0b0_hi, a0, b0);
+                (a1b1_lo, a1b1_hi) = <P as FieldExt<P>>::mul_acc(a1b1_lo, a1b1_hi, a1, b1);
+                (c1_lo, c1_hi) = <P as FieldExt<P>>::mul_acc(c1_lo, c1_hi, a0, b1);
+                (c1_lo, c1_hi) = <P as FieldExt<P>>::mul_acc(c1_lo, c1_hi, a1, b0);
+            }
         }
         // γ is loop-invariant, so fold the Σ a1·b1 collapse and the γ
         // scale into a single REDC + mul_mont after the j loop.
         let a0b0 = <P as FieldExt<P>>::redc(a0b0_lo, a0b0_hi, Q, Q_N_PRIME);
         let a1b1 = <P as FieldExt<P>>::redc(a1b1_lo, a1b1_hi, Q, Q_N_PRIME);
         let a1b1g = mul_mont_p::<P>(a1b1, gamma_mont);
-        out.coeffs[2 * i] = add_mont::<P>(a0b0, a1b1g);
-        out.coeffs[2 * i + 1] = <P as FieldExt<P>>::redc(c1_lo, c1_hi, Q, Q_N_PRIME);
+        if let (Some(c0), Some(c1)) = (oi.next(), oi.next()) {
+            *c0 = add_mont::<P>(a0b0, a1b1g);
+            *c1 = <P as FieldExt<P>>::redc(c1_lo, c1_hi, Q, Q_N_PRIME);
+        }
     }
 }
 

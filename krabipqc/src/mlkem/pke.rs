@@ -76,7 +76,7 @@ where
     }
     let t_hat: Zeroizing<PolyVec<u32, K>> = Zeroizing::new(t_hat_raw);
 
-    let t_hat_canon: Zeroizing<PolyVec<u32, K>> = Zeroizing::new(polyvec_from_mont::<_, P>(&t_hat));
+    let t_hat_canon: Zeroizing<PolyVec<u32, K>> = Zeroizing::new(polyvec_from_mont::<K, P>(&t_hat));
     let t_hat_slot = ek_out
         .get_mut(..384 * K)
         .ok_or(EncodeError::BufferTooSmall)?;
@@ -89,7 +89,7 @@ where
     }
     rho_slot.copy_from_slice(&rho);
 
-    let s_hat_canon: Zeroizing<PolyVec<u32, K>> = Zeroizing::new(polyvec_from_mont::<_, P>(&s_hat));
+    let s_hat_canon: Zeroizing<PolyVec<u32, K>> = Zeroizing::new(polyvec_from_mont::<K, P>(&s_hat));
     byte_encode_vec(&s_hat_canon, 12, dk_out)?;
     Ok(())
 }
@@ -196,12 +196,10 @@ pub(crate) fn encrypt_compare_impl<const K: usize, P>(
 where
     P: Personality + FieldExt<P>,
 {
-    let mut rho = [0u8; 32];
-    let rho_src = ek.get(384 * K..).ok_or(EncodeError::BufferTooSmall)?;
-    if rho_src.len() != 32 {
-        return Err(EncodeError::BufferTooSmall);
-    }
-    rho.copy_from_slice(rho_src);
+    let rho: [u8; 32] = *ek
+        .get(384 * K..)
+        .and_then(|s| <&[u8; 32]>::try_from(s).ok())
+        .ok_or(EncodeError::BufferTooSmall)?;
 
     let (y_raw, e2_raw) = sample_re_y_e2::<K>(r, params.eta1, params.eta2)?;
     let mut y: Zeroizing<PolyVec<u32, K>> = Zeroizing::new(y_raw);

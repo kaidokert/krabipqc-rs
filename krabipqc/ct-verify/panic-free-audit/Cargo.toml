@@ -1,0 +1,29 @@
+[package]
+name = "panic-free-audit"
+version = "0.0.0"
+edition = "2021"
+rust-version = "1.87"
+publish = false
+description = "Linker-DCE audit: confirm the krabipqc ML-KEM decaps path synthesizes no panic symbols."
+
+[lib]
+# staticlib so a cross-target build produces a `.a` that llvm-nm can
+# read without a linker script or runtime.
+crate-type = ["staticlib"]
+
+[features]
+default = []
+# Enabled by the shared panic-audit command; makes the crate no_std with
+# its own #[panic_handler] so `panic!` sites are the only panic machinery.
+panic-handler = []
+# Deliberately-panicky controls; built separately so the audit can verify
+# they trip and the audit tooling is wired up correctly.
+neg-controls = []
+# Cordon sha3/keccak: swap krabipqc's hashing module for zero-filling
+# stubs so the external dependency's internal panic sites don't appear in
+# the audit call graph.  sha3 is DCE'd from the final archive.
+stub-keccak = ["krabipqc/stub-hashing"]
+
+[dependencies]
+krabipqc = { path = "../..", default-features = false }
+krabi-caliper = { version = "0.1", features = ["deterministic-rng"] }

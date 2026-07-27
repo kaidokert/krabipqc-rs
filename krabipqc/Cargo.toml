@@ -23,6 +23,13 @@ acvp = []
 # the binding constraint; the cost scales with the retry rate.
 lowmem = []
 
+# Replace sha3 hashing with trivially-zero stubs. sha3 is still in the
+# dependency graph but all calls go through the stubs; LTO DCEs the sha3
+# code out of the final archive. Used by the panic-free audit so that
+# sha3/keccak's internal panic sites don't contaminate krabipqc's own
+# analysis.
+stub-hashing = []
+
 [dependencies]
 # All Z_q arithmetic flows through modmath.
 modmath = { version = "0.6.0", features = ["zeroize"] }

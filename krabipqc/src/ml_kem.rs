@@ -12,7 +12,7 @@
 //! shape is preserved end-to-end.
 
 macro_rules! per_set {
-    ($mod:ident, $params:ident, $ek:expr, $dk:expr, $ct:expr, $doc:expr) => {
+    ($mod:ident, $params:ident, $k:literal, $ek:expr, $dk:expr, $ct:expr, $doc:expr) => {
         #[doc = $doc]
         pub mod $mod {
             use const_num_traits::Ct;
@@ -36,7 +36,7 @@ macro_rules! per_set {
             ) -> Result<([u8; EK_BYTES], [u8; DK_BYTES]), EncodeError> {
                 let mut ek = [0u8; EK_BYTES];
                 let mut dk = [0u8; DK_BYTES];
-                kem::keygen_internal_impl::<_, Ct>(&$params, d, z, &mut ek, &mut dk)?;
+                kem::keygen_internal_impl::<$k, Ct>(&$params, d, z, &mut ek, &mut dk)?;
                 Ok((ek, dk))
             }
 
@@ -49,7 +49,7 @@ macro_rules! per_set {
             ) -> Result<([u8; SS_BYTES], [u8; CT_BYTES]), EncodeError> {
                 let mut ss = [0u8; SS_BYTES];
                 let mut ct = [0u8; CT_BYTES];
-                kem::encaps_internal_impl::<_, Ct>(&$params, ek, m, &mut ss, &mut ct)?;
+                kem::encaps_internal_impl::<$k, Ct>(&$params, ek, m, &mut ss, &mut ct)?;
                 Ok((ss, ct))
             }
 
@@ -60,7 +60,7 @@ macro_rules! per_set {
                 ct: &[u8; CT_BYTES],
             ) -> Result<[u8; SS_BYTES], EncodeError> {
                 let mut ss = [0u8; SS_BYTES];
-                kem::decaps_internal_impl::<_, Ct>(&$params, dk, ct, &mut ss)?;
+                kem::decaps_internal_impl::<$k, Ct>(&$params, dk, ct, &mut ss)?;
                 Ok(ss)
             }
 
@@ -94,6 +94,7 @@ macro_rules! per_set {
 per_set!(
     ml_kem_512,
     ML_KEM_512,
+    2,
     800,
     1632,
     768,
@@ -102,6 +103,7 @@ per_set!(
 per_set!(
     ml_kem_768,
     ML_KEM_768,
+    3,
     1184,
     2400,
     1088,
@@ -110,6 +112,7 @@ per_set!(
 per_set!(
     ml_kem_1024,
     ML_KEM_1024,
+    4,
     1568,
     3168,
     1568,
