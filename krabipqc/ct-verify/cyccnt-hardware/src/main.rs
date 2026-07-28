@@ -14,7 +14,6 @@ use krabipqc::ml_kem_512;
 use stm32f4xx_hal::{pac, prelude::*};
 
 const TRIALS: usize = 4;
-const HCLK_HZ: u32 = 30_000_000;
 const MAX_POSITIVE_SPREAD: u64 = 32;
 const STACK_SAFE_ZONE: usize = 512;
 const SUITE: &str = "krabipqc-mlkem512-decaps";
@@ -25,10 +24,18 @@ struct DecapsCase {
     ct: [u8; ml_kem_512::CT_BYTES],
 }
 
-fn make_cases() -> (DecapsCase, DecapsCase) {
-    let (ek, dk_a) = ml_kem_512::keygen_from_seed(&[0x11; 32], &[0x12; 32]).unwrap();
-    let (_, dk_b) = ml_kem_512::keygen_from_seed(&[0xa1; 32], &[0xa2; 32]).unwrap();
-    let (expected, ct) = ml_kem_512::encaps_from_seed(&ek, &[0x13; 32]).unwrap();
+// Returns (valid_case, rejection_case): ct is encapsulated under ek_a, so
+// dk_a decapsulates correctly and dk_b (from a different keypair) rejects.
+fn make_cases(
+    d_a: &[u8; 32],
+    z_a: &[u8; 32],
+    d_b: &[u8; 32],
+    z_b: &[u8; 32],
+    m: &[u8; 32],
+) -> (DecapsCase, DecapsCase) {
+    let (ek_a, dk_a) = ml_kem_512::keygen_from_seed(d_a, z_a).unwrap();
+    let (_, dk_b) = ml_kem_512::keygen_from_seed(d_b, z_b).unwrap();
+    let (expected, ct) = ml_kem_512::encaps_from_seed(&ek_a, m).unwrap();
     assert_eq!(ml_kem_512::decaps(&dk_a, &ct).unwrap(), expected);
     assert_ne!(ml_kem_512::decaps(&dk_b, &ct).unwrap(), expected);
     (DecapsCase { dk: dk_a, ct }, DecapsCase { dk: dk_b, ct })
@@ -74,23 +81,38 @@ fn stop() -> ! {
 fn main() -> ! {
     let mut reporter = krabi_caliper::protocol::rtt::init_ct_compatible();
 
-    let (case_a, case_b) = make_cases();
+    // Seed set 1: original pair
+    let (case_a, case_b) = make_cases(
+        &[0x11; 32],
+        &[0x12; 32],
+        &[0xa1; 32],
+        &[0xa2; 32],
+        &[0x13; 32],
+    );
+    // Seed set 2: independent pair — different magnitude/direction would confirm
+    // the gap is key-specific rather than tied to the valid/rejection code path.
+    let (case_c, case_d) = make_cases(
+        &[0x31; 32],
+        &[0x32; 32],
+        &[0xc1; 32],
+        &[0xc2; 32],
+        &[0x33; 32],
+    );
 
     let mut peripherals = cortex_m::Peripherals::take().unwrap();
     let device = pac::Peripherals::take().unwrap();
-    let _clocks = device.RCC.constrain().cfgr.sysclk(30.MHz()).freeze();
-    let mut platform = DwtMeasurementPlatform::enable(
-        &mut peripherals.DCB,
-        &mut peripherals.DWT,
-        Some(HCLK_HZ as u64),
-    )
-    .unwrap();
+    // Derive hclk_hz from the HAL so the reported frequency matches configuration.
+    let clocks = device.RCC.constrain().cfgr.sysclk(30.MHz()).freeze();
+    let hclk_hz = clocks.hclk().raw() as u64;
+    let mut platform =
+        DwtMeasurementPlatform::enable(&mut peripherals.DCB, &mut peripherals.DWT, Some(hclk_hz))
+            .unwrap();
     let stack_probe = paint_stack();
 
     let run_fields = [
         Field::token("parameter_set", "ml-kem-512"),
         Field::token("clock_profile", "hsi-pll-30mhz-0ws"),
-        Field::u64("hclk_hz", HCLK_HZ as u64),
+        Field::u64("hclk_hz", hclk_hz),
         Field::u64("trials", TRIALS as u64),
         Field::u64("max_positive_spread", MAX_POSITIVE_SPREAD),
     ];
@@ -102,7 +124,7 @@ fn main() -> ! {
             target: "cortex-m4f",
             board: Some("j-trace-stm32f407vg"),
             unit: Unit::CoreCycles,
-            frequency_hz: Some(HCLK_HZ as u64),
+            frequency_hz: Some(hclk_hz),
             warmup_blocks: 1,
             batches: 1,
             positive_max_spread: MAX_POSITIVE_SPREAD,
@@ -116,8 +138,32 @@ fn main() -> ! {
     )
     .unwrap();
 
+    // Original: A=valid(dk_a), B=rejection(dk_b)
     suite
         .positive_prepared("mlkem512_decaps", &case_a, &case_b, copy_case, decaps_once)
+        .unwrap();
+    // Swapped: A=rejection(dk_b), B=valid(dk_a).  If the gap reverses cleanly
+    // (B now slower than A by ~25 cycles), the difference is in the key data,
+    // not in which code path runs.
+    suite
+        .positive_prepared(
+            "mlkem512_decaps_inv",
+            &case_b,
+            &case_a,
+            copy_case,
+            decaps_once,
+        )
+        .unwrap();
+    // Independent seed pair: a different magnitude or direction here rules out
+    // a structural valid/rejection timing difference.
+    suite
+        .positive_prepared(
+            "mlkem512_decaps_alt",
+            &case_c,
+            &case_d,
+            copy_case,
+            decaps_once,
+        )
         .unwrap();
 
     const SLOW: [u8; 64] = [0; 64];
