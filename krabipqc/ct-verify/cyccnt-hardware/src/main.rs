@@ -14,7 +14,7 @@ use krabipqc::ml_kem_512;
 use stm32f4xx_hal::{pac, prelude::*};
 
 const TRIALS: usize = 4;
-const MAX_POSITIVE_SPREAD: u64 = 32;
+const MAX_POSITIVE_SPREAD: u64 = 0;
 const STACK_SAFE_ZONE: usize = 512;
 const SUITE: &str = "krabipqc-mlkem512-decaps";
 
