@@ -13,6 +13,6 @@ jobs:
     uses: kaidokert/krabi-caliper-rs/.github/workflows/hw-ct.yml@hw-ct-v1
     with:
       invocation-name: krabipqc
-      campaigns-json: '["krabipqc-mlkem512-ct-jtrace-f407"]'
+      campaigns-json: '["krabipqc-mlkem512-ct-jtrace-f407","krabipqc-mldsa44-ct-jtrace-f407"]'
       working-directory: krabipqc/ct-verify/cyccnt-hardware
       prepared: true
