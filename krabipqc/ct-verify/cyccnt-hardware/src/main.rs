@@ -97,10 +97,18 @@ fn main() -> ! {
     let mut reporter = krabi_caliper::protocol::rtt::init_ct_compatible();
 
     let (case_a, case_b) = make_cases(&[0x11; 32], &[0x12; 32], &[0x13; 32]);
-    // Diagnostic: two valid decaps with the same dk but different cts.
-    // Spread here isolates ct-data arithmetic noise from the path switch.
+    // Three valid-vs-valid pairs with different ct seeds; same dk.
+    // Spread here is pure ct-data arithmetic noise (no path switch).
+    // If any of these reaches ≥26, the valid/invalid gap is within noise.
     let (case_c, case_d) =
         make_cases_both_valid(&[0x11; 32], &[0x12; 32], &[0x13; 32], &[0x23; 32]);
+    let (case_e, case_f) =
+        make_cases_both_valid(&[0x11; 32], &[0x12; 32], &[0x33; 32], &[0x43; 32]);
+    let (case_g, case_h) =
+        make_cases_both_valid(&[0x11; 32], &[0x12; 32], &[0x53; 32], &[0x63; 32]);
+    // Second valid/invalid pair (different m seed) to check if the -26 shift
+    // is systematic across different valid cts or ct-data-specific.
+    let (case_i, case_j) = make_cases(&[0x11; 32], &[0x12; 32], &[0x33; 32]);
 
     let mut peripherals = cortex_m::Peripherals::take().unwrap();
     let device = pac::Peripherals::take().unwrap();
@@ -145,13 +153,42 @@ fn main() -> ! {
     suite
         .positive_prepared("mlkem512_decaps", &case_a, &case_b, copy_case, decaps_once)
         .unwrap();
-    // Diagnostic: A=valid(m1) vs B=valid(m2).  If spread ≈ 26, the gap in
-    // mlkem512_decaps comes from ct-data arithmetic, not the path switch.
+    // Diagnostics: A=valid(mX) vs B=valid(mY) with same dk, different ct seeds.
+    // Spread is pure ct-data arithmetic noise; establishes the noise floor.
     suite
         .positive_prepared(
             "mlkem512_decaps_vv",
             &case_c,
             &case_d,
+            copy_case,
+            decaps_once,
+        )
+        .unwrap();
+    suite
+        .positive_prepared(
+            "mlkem512_decaps_vv2",
+            &case_e,
+            &case_f,
+            copy_case,
+            decaps_once,
+        )
+        .unwrap();
+    suite
+        .positive_prepared(
+            "mlkem512_decaps_vv3",
+            &case_g,
+            &case_h,
+            copy_case,
+            decaps_once,
+        )
+        .unwrap();
+    // Second valid/invalid pair with a different valid ct (m=[0x33;32]).
+    // Checks whether the 26-cycle valid/invalid offset is systematic or ct-specific.
+    suite
+        .positive_prepared(
+            "mlkem512_decaps_vi2",
+            &case_i,
+            &case_j,
             copy_case,
             decaps_once,
         )
