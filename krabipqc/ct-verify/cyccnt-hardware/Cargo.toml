@@ -5,6 +5,14 @@ edition = "2024"
 rust-version = "1.88"
 publish = false
 
+[[bin]]
+name = "krabipqc-cyccnt-hardware"
+path = "src/main.rs"
+
+[[bin]]
+name = "krabipqc-mldsa44-sign"
+path = "src/bin/mldsa44_sign.rs"
+
 [dependencies]
 cortex-m = { version = "0.7", features = ["critical-section-single-core"] }
 cortex-m-rt = "0.7"
