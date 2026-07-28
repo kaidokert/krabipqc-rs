@@ -14,12 +14,13 @@ use krabipqc::ml_kem_512;
 use stm32f4xx_hal::{pac, prelude::*};
 
 const TRIALS: usize = 4;
-// Decaps timing varies with ct data (polynomial coefficients from different ct
-// bytes reach NTT and blinding arithmetic).  Measured across 8 ct seeds the
-// full range spanned ~88 cycles; valid and invalid timings interleave, so the
-// spread is public-ct-data noise, not a path-specific leak.  128 is the gate
-// ceiling — any regression that adds a SECRET-data-dependent component on top
-// of this public-data floor should produce a spread exceeding this bound.
+// Timing regression bound, not a statistical CT gate.  Decaps timing varies
+// with public ct data (polynomial coefficients reach NTT and blinding
+// arithmetic); across 8 ct seeds the spread spanned ~88 cycles with valid and
+// invalid timings fully interleaved, confirming the variation is public-input
+// noise.  128 catches gross regressions; a validity-correlated leak smaller
+// than this bound would not be detected here.  The constant-time guarantee
+// for this codebase comes from ctgrind and the assembly ladder gate in CI.
 const MAX_POSITIVE_SPREAD: u64 = 128;
 const STACK_SAFE_ZONE: usize = 512;
 const SUITE: &str = "krabipqc-mlkem512-decaps";
