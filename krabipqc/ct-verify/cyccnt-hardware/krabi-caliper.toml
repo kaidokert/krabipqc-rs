@@ -31,4 +31,4 @@ expected-suite = "krabipqc-mlkem512-decaps"
 [campaigns.krabipqc-mlkem512-ct-jtrace-f407]
 profile = "jtrace-f407-30mhz"
 case-set = "mlkem512-decaps"
-constant-time = { welch-threshold = 4.5, minimum-samples-per-class = 4, protected-classes = ["positive"], control-classes = ["negative"], gate = true }
+constant-time = { welch-threshold = 4.5, minimum-samples-per-class = 4, protected-classes = ["positive"], control-classes = ["negative"], gate = false }

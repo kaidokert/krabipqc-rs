@@ -24,21 +24,21 @@ struct DecapsCase {
     ct: [u8; ml_kem_512::CT_BYTES],
 }
 
-// Returns (valid_case, rejection_case): ct is encapsulated under ek_a, so
-// dk_a decapsulates correctly and dk_b (from a different keypair) rejects.
-fn make_cases(
-    d_a: &[u8; 32],
-    z_a: &[u8; 32],
-    d_b: &[u8; 32],
-    z_b: &[u8; 32],
-    m: &[u8; 32],
-) -> (DecapsCase, DecapsCase) {
-    let (ek_a, dk_a) = ml_kem_512::keygen_from_seed(d_a, z_a).unwrap();
-    let (_, dk_b) = ml_kem_512::keygen_from_seed(d_b, z_b).unwrap();
-    let (expected, ct) = ml_kem_512::encaps_from_seed(&ek_a, m).unwrap();
-    assert_eq!(ml_kem_512::decaps(&dk_a, &ct).unwrap(), expected);
-    assert_ne!(ml_kem_512::decaps(&dk_b, &ct).unwrap(), expected);
-    (DecapsCase { dk: dk_a, ct }, DecapsCase { dk: dk_b, ct })
+// Returns (valid_case, rejection_case): both use the same dk so expand_A
+// timing (SHAKE-128 rejection sampling on rho) is identical in both paths.
+// The invalid ct is a single-bit corruption of the valid ct; the FO re-
+// encryption equality check fails and the rejection shared-secret is returned.
+fn make_cases(d: &[u8; 32], z: &[u8; 32], m: &[u8; 32]) -> (DecapsCase, DecapsCase) {
+    let (ek, dk) = ml_kem_512::keygen_from_seed(d, z).unwrap();
+    let (expected, ct_valid) = ml_kem_512::encaps_from_seed(&ek, m).unwrap();
+    let mut ct_invalid = ct_valid;
+    ct_invalid[0] ^= 0x01;
+    assert_eq!(ml_kem_512::decaps(&dk, &ct_valid).unwrap(), expected);
+    assert_ne!(ml_kem_512::decaps(&dk, &ct_invalid).unwrap(), expected);
+    (
+        DecapsCase { dk, ct: ct_valid },
+        DecapsCase { dk, ct: ct_invalid },
+    )
 }
 
 fn copy_case(case: &DecapsCase) -> DecapsCase {
@@ -81,23 +81,7 @@ fn stop() -> ! {
 fn main() -> ! {
     let mut reporter = krabi_caliper::protocol::rtt::init_ct_compatible();
 
-    // Seed set 1: original pair
-    let (case_a, case_b) = make_cases(
-        &[0x11; 32],
-        &[0x12; 32],
-        &[0xa1; 32],
-        &[0xa2; 32],
-        &[0x13; 32],
-    );
-    // Seed set 2: independent pair — different magnitude/direction would confirm
-    // the gap is key-specific rather than tied to the valid/rejection code path.
-    let (case_c, case_d) = make_cases(
-        &[0x31; 32],
-        &[0x32; 32],
-        &[0xc1; 32],
-        &[0xc2; 32],
-        &[0x33; 32],
-    );
+    let (case_a, case_b) = make_cases(&[0x11; 32], &[0x12; 32], &[0x13; 32]);
 
     let mut peripherals = cortex_m::Peripherals::take().unwrap();
     let device = pac::Peripherals::take().unwrap();
@@ -138,32 +122,10 @@ fn main() -> ! {
     )
     .unwrap();
 
-    // Original: A=valid(dk_a), B=rejection(dk_b)
+    // A=valid(dk, ct_valid), B=rejection(dk, ct_invalid).  Same dk in both
+    // so expand_A (rho-derived, public) contributes identically to both paths.
     suite
         .positive_prepared("mlkem512_decaps", &case_a, &case_b, copy_case, decaps_once)
-        .unwrap();
-    // Swapped: A=rejection(dk_b), B=valid(dk_a).  If the gap reverses cleanly
-    // (B now slower than A by ~25 cycles), the difference is in the key data,
-    // not in which code path runs.
-    suite
-        .positive_prepared(
-            "mlkem512_decaps_inv",
-            &case_b,
-            &case_a,
-            copy_case,
-            decaps_once,
-        )
-        .unwrap();
-    // Independent seed pair: a different magnitude or direction here rules out
-    // a structural valid/rejection timing difference.
-    suite
-        .positive_prepared(
-            "mlkem512_decaps_alt",
-            &case_c,
-            &case_d,
-            copy_case,
-            decaps_once,
-        )
         .unwrap();
 
     const SLOW: [u8; 64] = [0; 64];
