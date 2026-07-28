@@ -24,10 +24,7 @@ struct DecapsCase {
     ct: [u8; ml_kem_512::CT_BYTES],
 }
 
-// Returns (valid_case, rejection_case): both use the same dk so expand_A
-// timing (SHAKE-128 rejection sampling on rho) is identical in both paths.
-// The invalid ct is a single-bit corruption of the valid ct; the FO re-
-// encryption equality check fails and the rejection shared-secret is returned.
+// (valid, rejection): same dk, valid ct vs single-bit-corrupted ct.
 fn make_cases(d: &[u8; 32], z: &[u8; 32], m: &[u8; 32]) -> (DecapsCase, DecapsCase) {
     let (ek, dk) = ml_kem_512::keygen_from_seed(d, z).unwrap();
     let (expected, ct_valid) = ml_kem_512::encaps_from_seed(&ek, m).unwrap();
@@ -39,6 +36,24 @@ fn make_cases(d: &[u8; 32], z: &[u8; 32], m: &[u8; 32]) -> (DecapsCase, DecapsCa
         DecapsCase { dk, ct: ct_valid },
         DecapsCase { dk, ct: ct_invalid },
     )
+}
+
+// (valid_m1, valid_m2): same dk, two independently-encapsulated cts.
+// Both are valid; any spread here comes from ct-data-dependent arithmetic
+// (different re-encryption polynomial coefficients), not from the
+// valid/rejection path switch.
+fn make_cases_both_valid(
+    d: &[u8; 32],
+    z: &[u8; 32],
+    m1: &[u8; 32],
+    m2: &[u8; 32],
+) -> (DecapsCase, DecapsCase) {
+    let (ek, dk) = ml_kem_512::keygen_from_seed(d, z).unwrap();
+    let (exp1, ct1) = ml_kem_512::encaps_from_seed(&ek, m1).unwrap();
+    let (exp2, ct2) = ml_kem_512::encaps_from_seed(&ek, m2).unwrap();
+    assert_eq!(ml_kem_512::decaps(&dk, &ct1).unwrap(), exp1);
+    assert_eq!(ml_kem_512::decaps(&dk, &ct2).unwrap(), exp2);
+    (DecapsCase { dk, ct: ct1 }, DecapsCase { dk, ct: ct2 })
 }
 
 fn copy_case(case: &DecapsCase) -> DecapsCase {
@@ -82,6 +97,10 @@ fn main() -> ! {
     let mut reporter = krabi_caliper::protocol::rtt::init_ct_compatible();
 
     let (case_a, case_b) = make_cases(&[0x11; 32], &[0x12; 32], &[0x13; 32]);
+    // Diagnostic: two valid decaps with the same dk but different cts.
+    // Spread here isolates ct-data arithmetic noise from the path switch.
+    let (case_c, case_d) =
+        make_cases_both_valid(&[0x11; 32], &[0x12; 32], &[0x13; 32], &[0x23; 32]);
 
     let mut peripherals = cortex_m::Peripherals::take().unwrap();
     let device = pac::Peripherals::take().unwrap();
@@ -122,10 +141,20 @@ fn main() -> ! {
     )
     .unwrap();
 
-    // A=valid(dk, ct_valid), B=rejection(dk, ct_invalid).  Same dk in both
-    // so expand_A (rho-derived, public) contributes identically to both paths.
+    // A=valid(dk, ct_valid), B=rejection(dk, ct_invalid).  Same dk in both.
     suite
         .positive_prepared("mlkem512_decaps", &case_a, &case_b, copy_case, decaps_once)
+        .unwrap();
+    // Diagnostic: A=valid(m1) vs B=valid(m2).  If spread ≈ 26, the gap in
+    // mlkem512_decaps comes from ct-data arithmetic, not the path switch.
+    suite
+        .positive_prepared(
+            "mlkem512_decaps_vv",
+            &case_c,
+            &case_d,
+            copy_case,
+            decaps_once,
+        )
         .unwrap();
 
     const SLOW: [u8; 64] = [0; 64];
