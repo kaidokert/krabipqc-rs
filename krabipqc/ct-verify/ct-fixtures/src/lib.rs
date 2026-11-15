@@ -14,7 +14,8 @@
 //! Naming contract:
 //! - `ct_fix__<op>__<params>` — positive; emitted code must be branch-free
 //!   on the tainted secret input.
-//! - `nct_fix__neg__<op>` — negative control; MUST trip each gate.
+//! - `nct_fix__neg__<op>` — negative control; MUST trip ctgrind. The asm
+//!   gate also pins the branch counts of `secret_branch` and `vartime_cmp`.
 //!
 //! Every secret input and output is wrapped in [`core::hint::black_box`] so
 //! fat-LTO `opt-level="z"` cannot fold the body into an ABI stub.
