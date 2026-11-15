@@ -442,9 +442,9 @@ dependencies = [
 
 [[package]]
 name = "krabi-caliper"
-version = "0.1.4"
+version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fce2421a104068c772ae58917b4343966c1663faace4c481e03342aaacecd34e"
+checksum = "c4368b6ade5f7ce4ad2d179abffb7654e4236eb5fd204d5ef7323cc1092afd99"
 dependencies = [
  "command-group",
  "cortex-m",
