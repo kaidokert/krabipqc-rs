@@ -13,12 +13,27 @@
 //! The shared-secret output is untainted before `black_box`: a KEM shared
 //! secret is secret-*derived* but is what the caller uses as key material, so
 //! reads of it downstream are not leaks.
+//!
+//! Secrets reach the fixtures through a `black_box`'d pointer. `taint` sets
+//! Valgrind metadata, not memory, and fat LTO inlines the fixtures into
+//! these wrappers, so a plain reference to a local lets the optimizer use
+//! the known value and the taint never reaches the code under test.
+//!
+//! Memcheck reports branches on tainted data, not conditional selects: a
+//! secret `if` that LLVM turns into `csel` on a pointer passes here (seen
+//! at opt-level "s" on aarch64, where "z" kept the branch).
 
 use core::hint::black_box;
 use krabi_caliper::ctgrind_fixture;
 
 krabi_caliper::ctgrind_standard_controls!();
 use krabi_caliper::host::ctgrind::{taint, taint_val, untaint_val};
+
+/// Taint `value` and return a pointer the optimizer cannot trace back to it.
+fn taint_ptr<T>(value: &T) -> *const T {
+    taint_val(value);
+    black_box(value as *const T)
+}
 
 // ---------------------------------------------------------------------------
 // ML-KEM decaps positives
@@ -43,7 +58,8 @@ ctgrind_fixture!(ct_fix__mlkem_decaps__512, {
     let mut out = [0u8; 32];
     taint::<u8>(&dk[..DK_PKE]);
     taint::<u8>(&dk[DK_BYTES - 32..]);
-    unsafe { ct_fix__mlkem_decaps__512(&dk, &ct, &mut out) }
+    let dk = black_box(&raw const dk);
+    unsafe { ct_fix__mlkem_decaps__512(dk, &ct, &mut out) }
     untaint_val(&out);
     let _ = black_box(out);
 });
@@ -66,7 +82,8 @@ ctgrind_fixture!(ct_fix__mlkem_decaps__768, {
     let mut out = [0u8; 32];
     taint::<u8>(&dk[..DK_PKE]);
     taint::<u8>(&dk[DK_BYTES - 32..]);
-    unsafe { ct_fix__mlkem_decaps__768(&dk, &ct, &mut out) }
+    let dk = black_box(&raw const dk);
+    unsafe { ct_fix__mlkem_decaps__768(dk, &ct, &mut out) }
     untaint_val(&out);
     let _ = black_box(out);
 });
@@ -89,7 +106,8 @@ ctgrind_fixture!(ct_fix__mlkem_decaps__1024, {
     let mut out = [0u8; 32];
     taint::<u8>(&dk[..DK_PKE]);
     taint::<u8>(&dk[DK_BYTES - 32..]);
-    unsafe { ct_fix__mlkem_decaps__1024(&dk, &ct, &mut out) }
+    let dk = black_box(&raw const dk);
+    unsafe { ct_fix__mlkem_decaps__1024(dk, &ct, &mut out) }
     untaint_val(&out);
     let _ = black_box(out);
 });
@@ -104,8 +122,8 @@ unsafe extern "C" {
 ctgrind_fixture!(nct_fix__neg__secret_branch, {
     let s = [0u8; 64];
     let mut out = 0u8;
-    taint_val(&s);
-    unsafe { nct_fix__neg__secret_branch(&s, &mut out) }
+    let s = taint_ptr(&s);
+    unsafe { nct_fix__neg__secret_branch(s, &mut out) }
     untaint_val(&out);
     let _ = black_box(out);
 });
@@ -116,8 +134,28 @@ unsafe extern "C" {
 ctgrind_fixture!(nct_fix__neg__vartime_cmp, {
     let s = [0u8; 64];
     let mut out = 0u8;
-    taint_val(&s);
-    unsafe { nct_fix__neg__vartime_cmp(&s, &mut out) }
+    let s = taint_ptr(&s);
+    unsafe { nct_fix__neg__vartime_cmp(s, &mut out) }
     untaint_val(&out);
     let _ = black_box(out);
+});
+
+unsafe extern "C" {
+    fn nct_fix__neg__value_loop(a_ptr: *const [u32; 4]) -> u32;
+}
+ctgrind_fixture!(nct_fix__neg__value_loop, {
+    let a = [0u32; 4];
+    let r = unsafe { nct_fix__neg__value_loop(taint_ptr(&a)) };
+    untaint_val(&r);
+    let _ = black_box(r);
+});
+
+unsafe extern "C" {
+    fn nct_fix__neg__secret_bound(n_ptr: *const u32) -> u32;
+}
+ctgrind_fixture!(nct_fix__neg__secret_bound, {
+    let n = 0u32;
+    let r = unsafe { nct_fix__neg__secret_bound(taint_ptr(&n)) };
+    untaint_val(&r);
+    let _ = black_box(r);
 });
