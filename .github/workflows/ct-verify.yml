@@ -17,7 +17,7 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
-  CALIPER_VERSION: 0.1.4
+  CALIPER_VERSION: 0.4.0
 
 permissions:
   contents: read
@@ -70,14 +70,20 @@ jobs:
             --suppressions=ct-ctgrind/ct-ctgrind.supp -q \
             target/release/ct-ctgrind
 
-  # Cross-target assembly ladder: cross-build fixture staticlib per ISA,
-  # disassemble, and assert each ct_fix__* symbol carries at most
-  # ladder_allowed_branches conditional branches.
-  ladder:
+  # Cross-target assembly gate: cross-build the fixture staticlib per ISA,
+  # disassemble, and require the calibrated conditional-branch count in every
+  # symbol ML-KEM-512 decaps reaches. Runs at opt-level "s" and "z": Cargo
+  # ignores a dependency's [profile], and the two inline different parts of
+  # decaps, so each level has its own calibration.
+  asm:
+    name: asm (${{ matrix.target }}, opt ${{ matrix.opt }})
     runs-on: ubuntu-latest
+    env:
+      CARGO_PROFILE_RELEASE_OPT_LEVEL: ${{ matrix.opt }}
     strategy:
       fail-fast: false
       matrix:
+        opt: ["s", "z"]
         target:
           - thumbv7em-none-eabi
           - thumbv7m-none-eabi
@@ -97,9 +103,9 @@ jobs:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
-          key: ct-ladder-${{ matrix.target }}-${{ hashFiles('krabipqc/ct-verify/**/Cargo.toml', 'krabipqc/ct-verify/Cargo.lock', 'krabipqc/Cargo.toml') }}
-          restore-keys: ct-ladder-${{ matrix.target }}-
-      - name: Ladder gate
+          key: ct-asm-${{ matrix.target }}-${{ hashFiles('krabipqc/ct-verify/**/Cargo.toml', 'krabipqc/ct-verify/Cargo.lock', 'krabipqc/Cargo.toml') }}
+          restore-keys: ct-asm-${{ matrix.target }}-
+      - name: Assembly gate
         working-directory: krabipqc/ct-verify
         run: cargo run --release -p ct-driver -- --target ${{ matrix.target }}
 
