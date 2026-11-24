@@ -55,6 +55,10 @@ pub fn test_fixture(testable: fn() -> bool, algo: &str, backend: &str) {
             hprintln!("MEASUREMENT ERROR: reporter failed");
             debug::exit(debug::EXIT_FAILURE);
         }
+        Err(_) => {
+            hprintln!("MEASUREMENT ERROR");
+            debug::exit(debug::EXIT_FAILURE);
+        }
     }
 }
 
