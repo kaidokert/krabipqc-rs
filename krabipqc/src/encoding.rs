@@ -370,10 +370,7 @@ pub fn validate_hint_bytes<const K: usize>(hint: &[u8], omega: usize) -> bool {
         }
         idx = end;
     }
-    if hint[idx..omega].iter().any(|&b| b != 0) {
-        return false;
-    }
-    true
+    hint[idx..omega].iter().all(|&b| b == 0)
 }
 
 /// Round-trip test helper; the sign path decodes rows individually.

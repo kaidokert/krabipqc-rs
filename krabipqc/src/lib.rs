@@ -1,5 +1,8 @@
 #![cfg_attr(not(test), no_std)]
 #![forbid(unsafe_code)]
+// Most index loops walk several fixed-size arrays in lockstep, and rewriting
+// them as iterator chains changes the codegen the constant-time gates check.
+#![allow(clippy::needless_range_loop)]
 
 //! `no_std` ML-DSA (FIPS 204) and ML-KEM (FIPS 203) for microcontrollers.
 //! Byte-for-byte ACVP-conformant on all six parameter sets.
