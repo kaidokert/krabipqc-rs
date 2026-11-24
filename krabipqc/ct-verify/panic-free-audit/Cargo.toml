@@ -26,4 +26,4 @@ stub-keccak = ["krabipqc/stub-hashing"]
 
 [dependencies]
 krabipqc = { path = "../..", default-features = false }
-krabi-caliper = { version = "0.1", features = ["deterministic-rng"] }
+krabi-caliper = { version = "0.4", features = ["deterministic-rng"] }

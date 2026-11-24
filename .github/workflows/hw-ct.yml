@@ -10,7 +10,7 @@ on:
 
 jobs:
   hardware:
-    uses: kaidokert/krabi-caliper-rs/.github/workflows/hw-ct.yml@hw-ct-v1
+    uses: kaidokert/krabi-caliper-rs/.github/workflows/hw-ct.yml@hw-ct-v2
     with:
       invocation-name: krabipqc
       campaigns-json: '["krabipqc-mlkem512-ct-jtrace-f407"]'
