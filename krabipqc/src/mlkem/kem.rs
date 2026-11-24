@@ -5,6 +5,7 @@
 //! so the result is deterministic — what NIST ACVP tests.
 
 use const_num_traits::Personality;
+use subtle::{Choice, ConditionallySelectable};
 use zeroize::Zeroizing;
 
 use crate::encoding::EncodeError;
@@ -142,8 +143,12 @@ where
     // a single diff byte. Avoids the ~2 KiB ct_prime buffer that buffering the
     // full re-encrypted ciphertext would require.
     let eq = pke::encrypt_compare_impl::<K, P>(params, ek_pke, &m_prime, &r_prime, ct)?;
+    // Through `Choice`, which `subtle` keeps opaque to the optimizer. LLVM
+    // saw that the bare 0x00/0xFF mask picks one of two buffers and loaded
+    // from a secret-selected address instead of masking the bytes.
+    let accept = Choice::from(eq & 1);
     for i in 0..32 {
-        ss_out[i] = (k_prime[i] & eq) | (k_bar[i] & !eq);
+        ss_out[i] = u8::conditional_select(&k_bar[i], &k_prime[i], accept);
     }
     Ok(())
 }
