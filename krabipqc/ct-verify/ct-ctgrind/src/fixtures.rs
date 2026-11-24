@@ -18,10 +18,6 @@
 //! Valgrind metadata, not memory, and fat LTO inlines the fixtures into
 //! these wrappers, so a plain reference to a local lets the optimizer use
 //! the known value and the taint never reaches the code under test.
-//!
-//! Memcheck reports branches on tainted data, not conditional selects: a
-//! secret `if` that LLVM turns into `csel` on a pointer passes here (seen
-//! at opt-level "s" on aarch64, where "z" kept the branch).
 
 use core::hint::black_box;
 use krabi_caliper::ctgrind_fixture;
