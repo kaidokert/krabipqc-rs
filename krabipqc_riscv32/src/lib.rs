@@ -41,6 +41,7 @@ pub fn test_fixture(testable: fn() -> bool, algo: &str, backend: &str) {
             }
             krabi_caliper::FootprintError::Stack(_) => "MEASUREMENT ERROR: invalid stack bounds",
             krabi_caliper::FootprintError::Reporter(_) => "MEASUREMENT ERROR: reporter failed",
+            _ => "MEASUREMENT ERROR",
         };
         let _ = writeln!(writer, "{message}");
     }
