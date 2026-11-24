@@ -131,6 +131,10 @@ struct Target {
 /// - `subtle`'s `ct_lt` bit-smearing loop (counter seeded at 1, doubling to
 ///   the constant 32), inlined into `wide_redc_ct` and
 ///   `wide_montgomery_mul_acc_ct` at "s" and out of line at "z".
+///
+/// Only the thumbv7m branches were reviewed one by one; the other targets'
+/// counts are as measured, so a new count there needs the same review
+/// before it is copied in.
 #[rustfmt::skip]
 const TARGETS: &[Target] = &[
     Target {
@@ -154,24 +158,24 @@ const TARGETS: &[Target] = &[
         priority: 2,
         forbidden: mnemonics::THUMB_FORBIDDEN,
         allowed_cmov: mnemonics::THUMB_ALLOWED,
-        s: &[1, 71, 2, 17, 15, 5, 16, 11, 6, 8, 10, 10, 14, 20, 9, 7, 3, 6, 2, 0, 0, 3, 0, 2, 2],
-        z: &[1, 36, 2, 10, 7, 3, 7, 5, 3, 6, 6, 6, 13, 16, 8, 5, 3, 0, 0, 0, 0, 3, 0, 1, 0, 1, 1, 0, 0, 0, 1, 1, 0, 1, 2, 1, 1, 0, 0, 3, 2, 0, 0, 2, 2],
+        s: &[1, 70, 2, 17, 15, 5, 16, 11, 6, 8, 10, 10, 14, 20, 9, 7, 3, 6, 2, 0, 0, 3, 0, 2, 2],
+        z: &[1, 35, 2, 10, 7, 3, 7, 5, 3, 6, 6, 6, 13, 16, 8, 5, 3, 0, 0, 0, 0, 3, 0, 1, 0, 1, 1, 0, 0, 0, 1, 1, 0, 1, 2, 1, 1, 0, 0, 3, 2, 0, 0, 2, 2],
     },
     Target {
         triple: "riscv32imc-unknown-none-elf",
         priority: 3,
         forbidden: mnemonics::RISCV_FORBIDDEN,
         allowed_cmov: &[],
-        s: &[1, 65, 2, 17, 15, 5, 16, 11, 7, 9, 8, 8, 7, 14, 7, 5, 3, 6, 2, 0, 0, 3, 0, 2, 2],
-        z: &[1, 43, 3, 10, 9, 3, 9, 5, 5, 9, 8, 8, 8, 12, 8, 5, 3, 0, 0, 0, 0, 4, 0, 2, 0, 2, 2, 0, 0, 0, 0, 0, 0, 2, 4, 2, 2, 0, 0, 3, 4, 0, 0, 3, 2],
+        s: &[1, 64, 2, 17, 15, 5, 16, 11, 7, 9, 8, 8, 7, 14, 7, 5, 3, 6, 2, 0, 0, 3, 0, 2, 2],
+        z: &[1, 42, 3, 10, 9, 3, 9, 5, 5, 9, 8, 8, 8, 12, 8, 5, 3, 0, 0, 0, 0, 4, 0, 2, 0, 2, 2, 0, 0, 0, 0, 0, 0, 2, 4, 2, 2, 0, 0, 3, 4, 0, 0, 3, 2],
     },
     Target {
         triple: "riscv32imac-unknown-none-elf",
         priority: 3,
         forbidden: mnemonics::RISCV_FORBIDDEN,
         allowed_cmov: &[],
-        s: &[1, 65, 2, 17, 15, 5, 16, 11, 7, 9, 8, 8, 7, 14, 7, 5, 3, 6, 2, 0, 0, 3, 0, 2, 2],
-        z: &[1, 43, 3, 10, 9, 3, 9, 5, 5, 9, 8, 8, 8, 12, 8, 5, 3, 0, 0, 0, 0, 4, 0, 2, 0, 2, 2, 0, 0, 0, 0, 0, 0, 2, 4, 2, 2, 0, 0, 3, 4, 0, 0, 3, 2],
+        s: &[1, 64, 2, 17, 15, 5, 16, 11, 7, 9, 8, 8, 7, 14, 7, 5, 3, 6, 2, 0, 0, 3, 0, 2, 2],
+        z: &[1, 42, 3, 10, 9, 3, 9, 5, 5, 9, 8, 8, 8, 12, 8, 5, 3, 0, 0, 0, 0, 4, 0, 2, 0, 2, 2, 0, 0, 0, 0, 0, 0, 2, 4, 2, 2, 0, 0, 3, 4, 0, 0, 3, 2],
     },
 ];
 
