@@ -18,7 +18,7 @@
 //!   gate also pins the branch counts of `secret_branch` and `vartime_cmp`.
 //!
 //! Every secret input and output is wrapped in [`core::hint::black_box`] so
-//! fat-LTO `opt-level="z"` cannot fold the body into an ABI stub.
+//! fat LTO cannot fold the body into an ABI stub.
 
 #![cfg_attr(feature = "panic-handler", no_std)]
 
@@ -128,6 +128,38 @@ pub unsafe extern "C" fn nct_fix__neg__vartime_cmp(s_ptr: *const [u8; 64], out_p
         }
     }
     unsafe { *out_ptr = black_box(equal) }
+}
+
+/// Negative: loop that exits on a loaded secret value. MUST trip.
+///
+/// # Safety
+/// `a_ptr` must be valid.
+#[no_mangle]
+pub unsafe extern "C" fn nct_fix__neg__value_loop(a_ptr: *const [u32; 4]) -> u32 {
+    let a = black_box(unsafe { *a_ptr });
+    let mut i = 0;
+    while i < 4 && a[i] != 0 {
+        i += 1;
+    }
+    black_box(i as u32)
+}
+
+/// Negative: `for _ in 0..secret`. The counter steps by a constant, so
+/// counted-loop acceptance in an asm gate would pass it; taint must trip.
+///
+/// # Safety
+/// `n_ptr` must be valid.
+#[no_mangle]
+pub unsafe extern "C" fn nct_fix__neg__secret_bound(n_ptr: *const u32) -> u32 {
+    // Nonzero, so no zero-trip guard sits beside the latch and trips instead.
+    let n = black_box(unsafe { *n_ptr }) | 1;
+    let mut sum = 0u32;
+    let mut i = 0u32;
+    while i < n {
+        sum = black_box(sum.wrapping_add(i));
+        i += 1;
+    }
+    black_box(sum)
 }
 
 /// No-op that forces this rlib onto a consumer's link line. Without a

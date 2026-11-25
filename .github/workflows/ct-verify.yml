@@ -32,18 +32,27 @@ jobs:
   # select, confirms no secret-dependent branch trips memcheck.
   # x86_64 pins +lzcnt,+bmi1 so baseline leading_zeros doesn't lower to a
   # data-dependent branch. aarch64 covers the other common host encoding.
+  #
+  # ctgrind and panic-audit run at opt-level "s" and "z": Cargo ignores a
+  # dependency's [profile], so deployments pick their own level, and the two
+  # inline different parts of decaps.
   ctgrind:
+    name: ctgrind (${{ matrix.arch }}, opt ${{ matrix.opt }})
     strategy:
       fail-fast: false
       matrix:
+        arch: [x86_64, aarch64]
+        opt: ["s", "z"]
         include:
-          - runner: ubuntu-latest
-            arch: x86_64
+          - arch: x86_64
+            runner: ubuntu-latest
             rustflags: "-C target-feature=+lzcnt,+bmi1"
-          - runner: ubuntu-24.04-arm
-            arch: aarch64
+          - arch: aarch64
+            runner: ubuntu-24.04-arm
             rustflags: ""
     runs-on: ${{ matrix.runner }}
+    env:
+      CARGO_PROFILE_RELEASE_OPT_LEVEL: ${{ matrix.opt }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -112,10 +121,14 @@ jobs:
   # Linker-DCE panic-free audit: cross-build decaps path as a staticlib and
   # assert llvm-nm finds no core::panicking machinery.
   panic-audit:
+    name: panic-audit (${{ matrix.target }}, opt ${{ matrix.opt }})
     runs-on: ubuntu-latest
+    env:
+      CARGO_PROFILE_RELEASE_OPT_LEVEL: ${{ matrix.opt }}
     strategy:
       fail-fast: false
       matrix:
+        opt: ["s", "z"]
         target:
           - thumbv7m-none-eabi
           - riscv32imc-unknown-none-elf
