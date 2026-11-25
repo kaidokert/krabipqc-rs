@@ -1,11 +1,10 @@
 //! SHAKE128/256 wrappers used by ML-DSA, plus the SHA3-256 / SHA3-512
 //! helpers needed by ML-KEM (FIPS 203's H and G respectively).
 //!
-//! Under `--cfg krabipqc_stub_hashing` all functions return
-//! zero-filled output instead of calling sha3.  The sha3 crate is still
-//! a dependency but nothing calls into it, so LTO DCEs it out of any
-//! archive that enables the feature.  This is used by the panic-free
-//! audit to cordon sha3/keccak's internal panic sites.
+//! Under `--cfg krabipqc_stub_hashing` (set through `RUSTFLAGS`) all
+//! functions return zero-filled output instead of calling sha3, so LTO
+//! drops sha3 from the archive. The panic-free audit builds this way to
+//! keep sha3/keccak's internal panic sites out of its call graph.
 
 #[cfg(not(krabipqc_stub_hashing))]
 use sha3::digest::{ExtendableOutput, FixedOutput, Update, XofReader};
@@ -96,7 +95,7 @@ pub fn sha3_512(inputs: &[&[u8]]) -> [u8; 64] {
     out
 }
 
-// ── Stub implementations (krabipqc_stub_hashing cfg) ─────────────────────────────
+// ── Stub implementations (cfg krabipqc_stub_hashing) ────────────────────────
 // Zero-filled output; sha3 is never called so its panic sites are unreachable.
 
 /// Stub SHAKE-128 stream: squeeze produces zero bytes.
