@@ -156,9 +156,13 @@ jobs:
           fi
       - name: Panic-free audit
         working-directory: krabipqc/ct-verify
+        # Swaps krabipqc's sha3 calls for zero-filled stubs, so sha3's own
+        # panic sites stay out of the audited call graph.
+        env:
+          RUSTFLAGS: --cfg krabipqc_stub_hashing
         run: |
           cargo krabi-caliper panic-audit --workspace . --package panic-free-audit \
-            --target ${{ matrix.target }} --features panic-handler,stub-keccak \
+            --target ${{ matrix.target }} --features panic-handler \
             --negative-features neg-controls --owned-symbol '.*' \
             --expect-negative panic_audit__neg__bounds_check \
             --expect-negative panic_audit__neg__unwrap \

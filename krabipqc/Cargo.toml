@@ -23,13 +23,6 @@ acvp = []
 # the binding constraint; the cost scales with the retry rate.
 lowmem = []
 
-# Replace sha3 hashing with trivially-zero stubs. sha3 is still in the
-# dependency graph but all calls go through the stubs; LTO DCEs the sha3
-# code out of the final archive. Used by the panic-free audit so that
-# sha3/keccak's internal panic sites don't contaminate krabipqc's own
-# analysis.
-stub-hashing = []
-
 [dependencies]
 # All Z_q arithmetic flows through modmath.
 modmath = { version = "0.6.0", features = ["zeroize"] }
@@ -75,3 +68,10 @@ getrandom = { version = "0.4", features = ["sys_rng"] }
 hex = { version = "0.4", default-features = false, features = ["alloc"] }
 serde_json = { version = "1", default-features = false, features = ["alloc"] }
 serde = { version = "1", default-features = false, features = ["derive", "alloc"] }
+
+[lints.rust]
+# `--cfg krabipqc_stub_hashing` swaps sha3 for zero-filled stubs so the
+# panic-free audit can leave sha3's own panic sites out of its call graph.
+# A cfg, not a feature: features unify across a build, so any dependency
+# enabling it would zero every hash in the final binary.
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(krabipqc_stub_hashing)'] }
